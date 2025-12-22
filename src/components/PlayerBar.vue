@@ -417,7 +417,7 @@ watch(
                 <n-icon
                   v-if="!player.state.loading"
                   :component="player.state.isPlaying ? PauseCircle : PlayCircle"
-                  size="22"
+                  size="50"
                 />
               </template>
             </n-button>
