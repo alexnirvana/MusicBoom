@@ -371,8 +371,9 @@ watch(
               <n-button
                 secondary
                 strong
-                round
-                class="flex items-center gap-2 bg-white/10 border border-white/20 text-[#f2f5ff]"
+                circle
+                size="large"
+                class="flex items-center justify-center bg-white/10 border border-white/20 text-[#f2f5ff] mode-trigger"
                 :title="currentMode.label"
               >
                 <span class="relative flex items-center justify-center mode-icon">
@@ -528,6 +529,13 @@ watch(
 .mode-icon {
   width: 20px;
   height: 20px;
+}
+
+/* 播放模式按钮改为等宽高的圆形外观 */
+.mode-trigger {
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
 }
 
 .mode-badge {

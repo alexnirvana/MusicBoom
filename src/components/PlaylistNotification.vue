@@ -21,12 +21,48 @@ const emit = defineEmits<{
 
 const notification = useNotification();
 const notificationHolder = ref<ReturnType<typeof notification.create> | null>(null);
+const outsideListenerAttached = ref(false);
+
+// 判断事件是否发生在播放列表面板内部
+function isInsidePanel(eventTarget: EventTarget | null) {
+  if (!(eventTarget instanceof Node)) return false;
+  const panel = document.querySelector(".playlist-panel-notification .playlist-panel");
+  return panel ? panel.contains(eventTarget) : false;
+}
+
+// 失去焦点或点击到面板外时自动收起
+function handleFocusOutside(event: FocusEvent) {
+  if (!isInsidePanel(event.target)) {
+    close();
+  }
+}
+
+function handlePointerDown(event: MouseEvent) {
+  if (!isInsidePanel(event.target)) {
+    close();
+  }
+}
+
+function addOutsideListeners() {
+  if (outsideListenerAttached.value) return;
+  document.addEventListener("focusin", handleFocusOutside, true);
+  document.addEventListener("mousedown", handlePointerDown, true);
+  outsideListenerAttached.value = true;
+}
+
+function removeOutsideListeners() {
+  if (!outsideListenerAttached.value) return;
+  document.removeEventListener("focusin", handleFocusOutside, true);
+  document.removeEventListener("mousedown", handlePointerDown, true);
+  outsideListenerAttached.value = false;
+}
 
 function close() {
   if (notificationHolder.value) {
     notificationHolder.value.destroy();
     notificationHolder.value = null;
   }
+  removeOutsideListeners();
 }
 
 function open() {
@@ -57,6 +93,7 @@ function open() {
       width: "auto",
     },
   } as NotificationOptions & { class?: string });
+  addOutsideListeners();
 }
 
 function toggle() {
