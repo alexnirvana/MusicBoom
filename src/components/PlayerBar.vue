@@ -369,11 +369,10 @@ watch(
           >
             <template #trigger>
               <n-button
-                secondary
-                strong
+                quaternary
                 circle
-                size="large"
-                class="flex items-center justify-center bg-white/10 border border-white/20 text-[#f2f5ff] mode-trigger"
+                size="small"
+                class="flex items-center justify-center border border-white/20 text-[#f2f5ff] mode-trigger"
                 :title="currentMode.label"
               >
                 <span class="relative flex items-center justify-center mode-icon">
@@ -533,8 +532,8 @@ watch(
 
 /* 播放模式按钮改为等宽高的圆形外观 */
 .mode-trigger {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   border-radius: 9999px;
 }
 
