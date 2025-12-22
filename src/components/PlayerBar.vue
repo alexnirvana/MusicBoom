@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, nextTick, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, nextTick, ref, watch, h } from "vue";
 import type { Component } from "vue";
 import { useMessage } from "naive-ui";
 import {
@@ -12,8 +12,7 @@ import {
   PlayCircle,
   PlaySkipBackSharp,
   PlaySkipForwardSharp,
-  Repeat,
-  RepeatOutline,
+
   ReorderThreeOutline,
   Shuffle,
   VolumeHighOutline,
@@ -65,12 +64,71 @@ let favoriteCheckToken = 0;
 const favoriteIds = ref<Set<string>>(new Set());
 const favoritesReady = ref(false);
 
+const IconLoop = {
+  name: "IconLoop",
+  render: () =>
+    h(
+      "svg",
+      {
+        xmlns: "http://www.w3.org/2000/svg",
+        "xmlns:xlink": "http://www.w3.org/1999/xlink",
+        viewBox: "0 0 24 24",
+      },
+      [
+        h(
+          "g",
+          {
+            fill: "none",
+            stroke: "currentColor",
+            "stroke-width": "2",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+          },
+          [
+            h("path", { d: "M4 12V9a3 3 0 0 1 3-3h13m-3-3l3 3l-3 3" }),
+            h("path", { d: "M20 12v3a3 3 0 0 1-3 3H4m3 3l-3-3l3-3" }),
+          ]
+        ),
+      ]
+    ),
+};
+
+const IconSingleLoop = {
+  name: "IconSingleLoop",
+  render: () =>
+    h(
+      "svg",
+      {
+        xmlns: "http://www.w3.org/2000/svg",
+        "xmlns:xlink": "http://www.w3.org/1999/xlink",
+        viewBox: "0 0 24 24",
+      },
+      [
+        h(
+          "g",
+          {
+            fill: "none",
+            stroke: "currentColor",
+            "stroke-width": "2",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+          },
+          [
+            h("path", { d: "M4 12V9a3 3 0 0 1 3-3h13m-3-3l3 3l-3 3" }),
+            h("path", { d: "M20 12v3a3 3 0 0 1-3 3H4m3 3l-3-3l3-3" }),
+            h("path", { d: "M11 11l1-1v4" }),
+          ]
+        ),
+      ]
+    ),
+};
+
 // 播放模式信息，提供随机、顺序、单曲、列表四种模式
 const modes: { key: PlayMode; label: string; icon: Component }[] = [
   { key: "shuffle", label: "随机播放", icon: Shuffle },
   { key: "order", label: "顺序播放", icon: ReorderThreeOutline },
-  { key: "single", label: "单曲循环", icon: RepeatOutline },
-  { key: "list", label: "列表循环", icon: Repeat },
+  { key: "single", label: "单曲循环", icon: IconSingleLoop },
+  { key: "list", label: "列表循环", icon: IconLoop },
 ];
 
 // 基于全局状态计算当前模式
@@ -377,7 +435,6 @@ watch(
               >
                 <span class="relative flex items-center justify-center mode-icon">
                   <n-icon :component="currentMode.icon" />
-                  <span v-if="currentMode.key === 'single'" class="mode-badge">1</span>
                 </span>
               </n-button>
             </template>
@@ -391,7 +448,6 @@ watch(
                 <div class="flex items-center gap-3">
                   <span class="relative flex items-center justify-center mode-icon">
                     <n-icon :component="item.icon" />
-                    <span v-if="item.key === 'single'" class="mode-badge">1</span>
                   </span>
                   <span>{{ item.label }}</span>
                 </div>
@@ -537,13 +593,7 @@ watch(
   border-radius: 9999px;
 }
 
-.mode-badge {
-  position: absolute;
-  right: -2px;
-  top: -6px;
-  font-size: 10px;
-  color: #1dd87c;
-}
+
 
 .volume-slider :deep(.n-slider) {
   height: 150px;
