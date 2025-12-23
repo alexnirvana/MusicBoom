@@ -3,14 +3,11 @@ import { computed, onActivated, onMounted, ref, watch } from "vue";
 import type { TreeOption } from "naive-ui";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
-import {
-  listOpenlistDirectory,
-  removeOpenlistEntries,
-  uploadOpenlistFile,
-} from "../api/openlist";
+import { listOpenlistDirectory, removeOpenlistEntries } from "../api/openlist";
 import type { OpenlistFileEntry } from "../api/openlist/list";
 import { useOpenlistStore } from "../stores/openlist";
 import { useRouter } from "../utils/router-lite";
+import OpenlistUploader from "../components/OpenlistUploader.vue";
 
 const router = useRouter();
 const message = useMessage();
@@ -50,13 +47,11 @@ const displayTree = computed<TreeOption[]>(() => {
 const files = ref<OpenlistFileEntry[]>([]);
 const activeDir = ref("/");
 const loading = ref(false);
-const uploading = ref(false);
 const deleting = ref(false);
 const lastSessionSignature = ref<string | null>(null);
 const selectionMode = ref(false);
 const selectedPaths = ref<Set<string>>(new Set());
 const viewMode = ref<"detail" | "thumb">("detail");
-const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const driveAddress = computed(() => state.baseUrl || "尚未填写地址");
 const selectedCount = computed(() => selectedPaths.value.size);
@@ -205,43 +200,9 @@ const handleDirectorySelect = (keys: Array<string | number>) => {
   }
 };
 
-// 触发文件选择框上传
-const triggerUpload = () => {
-  fileInputRef.value?.click();
-};
-
-// 上传选中的文件列表
-const uploadFiles = async (filesToUpload: File[]) => {
-  if (!filesToUpload.length) return;
-
-  if (!state.token || !state.baseUrl) {
-    message.warning("请先登录 OpenList 网盘");
-    router.push({ name: "openlist-login" });
-    return;
-  }
-
-  uploading.value = true;
-  try {
-    for (const file of filesToUpload) {
-      await uploadOpenlistFile(state.baseUrl, state.token, activeDir.value, file);
-    }
-    message.success("上传完成，正在刷新目录");
-    fetchDirectory(activeDir.value);
-  } catch (error) {
-    const fallback = error instanceof Error ? error.message : String(error);
-    message.error(`上传文件失败：${fallback}`);
-  } finally {
-    uploading.value = false;
-  }
-};
-
-// 监听文件选择事件，调用上传
-const handleFileChange = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const fileList = target.files;
-  const filesToUpload = fileList ? Array.from(fileList) : [];
-  uploadFiles(filesToUpload);
-  target.value = "";
+// 上传完成后刷新目录，保持文件列表最新
+const handleUploadFinished = () => {
+  fetchDirectory(activeDir.value);
 };
 
 // 开关批量选择
@@ -353,14 +314,6 @@ onActivated(async () => {
         class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#0f1320]/70 px-5 py-3"
       >
         <div class="flex flex-wrap items-center gap-3 text-white">
-          <n-button type="primary" :loading="uploading" @click="triggerUpload">上传</n-button>
-          <input
-            ref="fileInputRef"
-            type="file"
-            multiple
-            class="hidden"
-            @change="handleFileChange"
-          />
           <n-button secondary :type="selectionMode ? 'info' : 'default'" @click="toggleSelectionMode">
             {{ selectionMode ? "取消批量选择" : "批量选择" }}
           </n-button>
@@ -382,6 +335,13 @@ onActivated(async () => {
           </n-button-group>
         </div>
       </div>
+
+      <OpenlistUploader
+        :base-url="state.baseUrl || ''"
+        :token="state.token || ''"
+        :active-dir="activeDir"
+        @uploaded="handleUploadFinished"
+      />
 
       <div class="grid gap-4 lg:grid-cols-[280px_1fr]">
         <div class="rounded-2xl border border-white/10 bg-[#0f1320]/70 px-4 py-3">
