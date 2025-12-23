@@ -127,6 +127,24 @@ function clampPercent(value: number) {
 // 音频 MIME 类型，统一生成 Blob URL 时使用
 const AUDIO_MIME = "audio/mpeg";
 
+// 将当前播放信息持久化，便于刷新或重新登录后恢复
+async function persistSnapshot() {
+  const track = currentTrack.value;
+  if (!track) {
+    await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, null);
+    return;
+  }
+
+  const snapshot: PlaybackSnapshot = {
+    trackId: track.id,
+    mode: state.mode,
+    volume: state.volume,
+    updatedAt: Date.now(),
+  };
+
+  await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, snapshot);
+}
+
 // 计算可播放的音频地址，若配置了缓存目录则先尝试落盘
 async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthContext) {
   const downloadSettings = await readSetting<DownloadSettings>(SETTING_KEYS.DOWNLOAD);
@@ -192,6 +210,7 @@ async function playCurrent() {
     }
     await audio.play();
     state.isPlaying = true;
+    await persistSnapshot();
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     state.error = `播放失败：${hint}`;
@@ -265,6 +284,9 @@ function clearPlaylist() {
   state.progress = 0;
   state.duration = 0;
   state.error = null;
+  writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, null).catch((error) => {
+    console.warn("清空播放快照失败", error);
+  });
 }
 
 // 登录或应用启动后从数据库恢复播放记录
@@ -364,6 +386,9 @@ function setVolume(value: number) {
   writeSetting(SETTING_KEYS.PLAYER_VOLUME, ratio).catch((error) => {
     console.warn("保存音量偏好失败", error);
   });
+  persistSnapshot().catch((error) => {
+    console.warn("写入播放快照失败", error);
+  });
 }
 
 // 直接设置目标播放模式，便于弹窗选择
@@ -373,6 +398,9 @@ function setMode(mode: PlayMode) {
   writeSetting(SETTING_KEYS.PLAYER_MODE, state.mode).catch((error) => {
     console.warn("保存播放模式失败", error);
   });
+  persistSnapshot().catch((error) => {
+    console.warn("写入播放快照失败", error);
+  });
 }
 
 // 切换播放模式
@@ -381,6 +409,9 @@ function cycleMode() {
   state.mode = PLAY_MODES[(index + 1) % PLAY_MODES.length];
   writeSetting(SETTING_KEYS.PLAYER_MODE, state.mode).catch((error) => {
     console.warn("保存播放模式失败", error);
+  });
+  persistSnapshot().catch((error) => {
+    console.warn("写入播放快照失败", error);
   });
 }
 
