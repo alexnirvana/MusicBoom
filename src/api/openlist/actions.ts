@@ -1,6 +1,52 @@
 import { normalizeOpenlistBaseUrl } from "./utils";
 
-// 上传单个文件到指定目录，使用 OpenList 官方接口
+// 判定是否在 Tauri 环境运行，用于决定是否走原生上传绕过 CORS
+function isTauriEnvironment(): boolean {
+  return typeof window !== "undefined" && "__TAURI_IPC__" in window;
+}
+
+// 通过 Tauri 原生插件上传文件，可绕过跨域限制并获取上传进度
+async function uploadViaTauri(
+  targetUrl: string,
+  authorization: string,
+  file: File,
+  onProgress?: (payload: { loaded: number; total: number; speed: number }) => void,
+) {
+  // 按需动态引入，避免在纯浏览器环境下加载插件包导致错误
+  const [{ upload }, { writeFile, remove }, { tempDir, join }] = await Promise.all([
+    import("@tauri-apps/plugin-upload"),
+    import("@tauri-apps/plugin-fs"),
+    import("@tauri-apps/api/path"),
+  ]);
+
+  const tempDirPath = await tempDir();
+  const tempFilePath = await join(tempDirPath, `musicboom-openlist-${Date.now()}-${file.name}`);
+
+  // 先写入临时文件，再交由原生上传，以便获取实时进度
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  await writeFile(tempFilePath, fileBytes);
+
+  const headers = new Map<string, string>();
+  headers.set("Authorization", authorization);
+  headers.set("Content-Type", file.type || "application/octet-stream");
+
+  try {
+    await upload(
+      targetUrl,
+      tempFilePath,
+      (progress) => {
+        const total = progress.progressTotal || file.size;
+        onProgress?.({ loaded: progress.progress, total, speed: progress.transferSpeed || 0 });
+      },
+      headers,
+    );
+  } finally {
+    // 上传完成或失败后清理临时文件，忽略删除报错以免影响主流程
+    await remove(tempFilePath).catch(() => {});
+  }
+}
+
+// 上传单个文件到指定目录，使用 WebDAV PUT 到 /dav 路径
 export async function uploadOpenlistFile(
   baseUrl: string,
   token: string,
@@ -14,13 +60,32 @@ export async function uploadOpenlistFile(
     throw new Error("未提供 Token，请重新登录后重试");
   }
 
-  const authorization = trimmedToken.replace(/^Bearer\s+/i, "");
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("path", targetDir || "/");
-  formData.append("name", file.name);
+  // remotePath 需要保持 WebDAV 规范：必须以 / 开头，且指向已经挂载的存储路径
+  const sanitizedDir = (targetDir || "/").trim() || "/";
+  const ensuredLeadingSlash = sanitizedDir.startsWith("/") ? sanitizedDir : `/${sanitizedDir}`;
+  const dirWithoutTrailingSlash = ensuredLeadingSlash === "/" ? "/" : ensuredLeadingSlash.replace(/\/+$/, "");
+  const remoteFilePath = dirWithoutTrailingSlash === "/" ? `/${file.name}` : `${dirWithoutTrailingSlash}/${file.name}`;
 
-  // 使用 XMLHttpRequest 便于获取实时上传进度和速度
+  // 对路径段进行编码，保证包含中文或空格时能够正确上传
+  const encodedPath = remoteFilePath
+    .split("/")
+    .map((segment, index) => (index === 0 ? "" : encodeURIComponent(segment)))
+    .join("/");
+
+  const targetUrl = `${normalizedBaseUrl}/dav${encodedPath}`;
+  const authorization = trimmedToken.replace(/^Bearer\s+/i, "");
+
+  if (isTauriEnvironment()) {
+    try {
+      await uploadViaTauri(targetUrl, authorization, file, onProgress);
+      return null;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`上传失败：${reason}`);
+    }
+  }
+
+  // 浏览器环境回退使用 XMLHttpRequest，可提供进度显示，但若目标站点未开放 CORS 会被拦截
   return await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const startTime = Date.now();
@@ -50,12 +115,13 @@ export async function uploadOpenlistFile(
     };
 
     xhr.onerror = () => {
-      reject(new Error("请求上传接口失败：网络异常"));
+      reject(new Error("请求上传接口失败：网络异常或跨域被拦截"));
     };
 
-    xhr.open("PUT", `${normalizedBaseUrl}/api/fs/put`);
+    xhr.open("PUT", targetUrl);
     xhr.setRequestHeader("Authorization", authorization);
-    xhr.send(formData);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.send(file);
   });
 }
 
