@@ -12,6 +12,8 @@ export interface OpenlistFileEntry {
   name: string;
   type: string;
   size: string;
+  // 记录文件的原始字节数，便于排序；文件夹没有有效值
+  sizeValue?: number;
   updated: string;
   updatedTime?: number;
   isDir: boolean;
@@ -89,6 +91,7 @@ export async function listOpenlistDirectory(
         name: isDir ? `${item.name}/` : item.name,
         type: isDir ? "文件夹" : "文件",
         size: isDir ? "--" : formatSize(item.size),
+        sizeValue: isDir ? undefined : item.size,
         updated: formatDate(item.modified),
         updatedTime,
         isDir,

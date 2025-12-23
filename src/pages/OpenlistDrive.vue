@@ -45,7 +45,7 @@ const displayTree = computed<TreeOption[]>(() => {
 });
 
 const files = ref<OpenlistFileEntry[]>([]);
-const sortKey = ref<"name" | "type" | "updated">("updated");
+const sortKey = ref<"name" | "type" | "size" | "updated">("updated");
 const sortOrder = ref<"asc" | "desc">("desc");
 const activeDir = ref("/");
 const loading = ref(false);
@@ -67,6 +67,7 @@ const sortedFiles = computed(() => {
 
   const pickValue = (file: OpenlistFileEntry) => {
     if (sortKey.value === "updated") return file.updatedTime ?? 0;
+    if (sortKey.value === "size") return file.sizeValue ?? -1;
     if (sortKey.value === "type") return file.type;
     return file.name;
   };
@@ -300,19 +301,19 @@ const setViewMode = (mode: "detail" | "thumb") => {
 };
 
 // 切换排序字段与方向，默认按更新时间倒序
-const toggleSort = (key: "name" | "type" | "updated") => {
+const toggleSort = (key: "name" | "type" | "size" | "updated") => {
   if (sortKey.value === key) {
     sortOrder.value = sortOrder.value === "asc" ? "desc" : "asc";
     return;
   }
 
   sortKey.value = key;
-  sortOrder.value = key === "updated" ? "desc" : "asc";
+  sortOrder.value = key === "updated" || key === "size" ? "desc" : "asc";
 };
 
 // 友好的排序标识，便于用户理解当前排序方式
-const renderSortIndicator = (key: "name" | "type" | "updated") => {
-  if (sortKey.value !== key) return "";
+const renderSortIndicator = (key: "name" | "type" | "size" | "updated") => {
+  if (sortKey.value !== key) return "↕";
   return sortOrder.value === "asc" ? "↑" : "↓";
 };
 
@@ -466,7 +467,16 @@ onActivated(async () => {
                             <span class="text-xs text-[#9ab4d8]">{{ renderSortIndicator('type') }}</span>
                           </button>
                         </th>
-                        <th class="px-4 py-3">大小</th>
+                        <th class="px-4 py-3">
+                          <button
+                            class="flex items-center gap-1 text-left font-semibold text-white"
+                            type="button"
+                            @click="toggleSort('size')"
+                          >
+                            <span>大小</span>
+                            <span class="text-xs text-[#9ab4d8]">{{ renderSortIndicator('size') }}</span>
+                          </button>
+                        </th>
                         <th class="px-4 py-3">
                           <button
                             class="flex items-center gap-1 text-left font-semibold text-white"
