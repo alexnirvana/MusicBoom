@@ -149,6 +149,10 @@ function cancelDownload(songId: string) {
   if (target) {
     target.status = "cancelled";
     target.progress = 0;
+    // 立即从数据库中删除或更新状态，避免刷新后又回来
+    persistDownload(target); 
+    // 从当前列表中移除，给用户即时反馈
+    state.downloads = state.downloads.filter(item => item.songId !== songId);
   }
 }
 
