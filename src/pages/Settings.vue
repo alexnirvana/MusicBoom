@@ -48,7 +48,7 @@ const downloadForm = reactive<DownloadSettings>({
   musicDir: "",
   organizeByAlbum: true,
   downloadLyrics: true,
-  overwriteExisting: true,
+  overwriteExisting: false,
   sourcePreference: "latest",
   cacheDir: "",
   speedLimitMode: "auto",

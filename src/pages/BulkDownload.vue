@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { exists, mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { computed, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { getSongs, buildStreamUrl, type FetchSongsOptions, type NavidromeSong } from "../api/navidrome";
@@ -64,22 +64,27 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+async function resolveTargetPath(song: NavidromeSong, ensureDir = false) {
+  const downloadDir = settingsState.download.musicDir.trim();
+  if (!downloadDir) {
+    throw new Error("请先在设置中配置下载目录");
+  }
+
+  const targetDir = settingsState.download.organizeByAlbum
+    ? await join(downloadDir, song.album || "未知专辑")
+    : downloadDir;
+  if (ensureDir) {
+    await mkdir(targetDir, { recursive: true });
+  }
+  const filename = `${song.title || song.id}.mp3`;
+  return join(targetDir, filename);
+}
+
 async function downloadOne(song: NavidromeSong) {
   await downloadStore.trackDownload(song, async (signal) => {
     await settingsReady;
     const context = resolveNavidromeContext();
-    const downloadDir = settingsState.download.musicDir.trim();
-    if (!downloadDir) {
-      throw new Error("请先在设置中配置下载目录");
-    }
-
-    const targetDir = settingsState.download.organizeByAlbum
-      ? await join(downloadDir, song.album || "未知专辑")
-      : downloadDir;
-    await mkdir(targetDir, { recursive: true });
-
-    const filename = `${song.title || song.id}.mp3`;
-    const targetPath = await join(targetDir, filename);
+    const targetPath = await resolveTargetPath(song, true);
     if (!settingsState.download.overwriteExisting && (await exists(targetPath))) {
       return { filePath: targetPath };
     }
@@ -112,6 +117,47 @@ async function downloadOne(song: NavidromeSong) {
   });
 }
 
+async function filterDownloadTargets(list: NavidromeSong[]) {
+  const pending: NavidromeSong[] = [];
+  const skipped: string[] = [];
+
+  for (const song of list) {
+    try {
+      const targetPath = await resolveTargetPath(song);
+      if (!settingsState.download.overwriteExisting && (await exists(targetPath))) {
+        skipped.push(song.title || song.id);
+        continue;
+      }
+
+      const finished = downloadStore.state.downloads.find(
+        (item) => item.songId === song.id && item.status === "success" && item.filePath
+      );
+      if (!settingsState.download.overwriteExisting && finished?.filePath) {
+        try {
+          if (await exists(finished.filePath)) {
+            skipped.push(song.title || song.id);
+            continue;
+          }
+        } catch (error) {
+          console.warn("检查历史下载文件失败，继续下载", error);
+        }
+      }
+
+      pending.push(song);
+    } catch (error) {
+      console.warn("计算文件路径失败，跳过该歌曲", error);
+    }
+  }
+
+  if (skipped.length) {
+    const display = skipped.slice(0, 3).join("、");
+    const moreHint = skipped.length > 3 ? ` 等 ${skipped.length} 首` : "";
+    message.info(`已跳过已存在的歌曲：${display}${moreHint}`);
+  }
+
+  return pending;
+}
+
 async function handleDownloadSelected() {
   if (selectedSongs.value.length === 0) {
     message.warning("请先选择需要下载的歌曲");
@@ -120,8 +166,13 @@ async function handleDownloadSelected() {
 
   downloading.value = true;
   try {
+    const targets = await filterDownloadTargets(selectedSongs.value);
+    if (targets.length === 0) {
+      message.success("所选歌曲均已存在，无需重复下载");
+      return;
+    }
     // 启动全部下载任务后立即跳转，确保能立刻看到进度
-    const tasks = selectedSongs.value.map((song) => downloadOne(song));
+    const tasks = targets.map((song) => downloadOne(song));
     downloadStore.setPreferredTab("downloading");
     router.push({ name: "local-download" });
     await Promise.allSettled(tasks);
@@ -143,6 +194,11 @@ function exitPage() {
 }
 
 onMounted(() => {
+  loadSongs();
+  downloadStore.refreshDownloads();
+});
+
+onActivated(() => {
   loadSongs();
   downloadStore.refreshDownloads();
 });

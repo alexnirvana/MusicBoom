@@ -1,15 +1,29 @@
 <script setup lang="ts">
-import { stat } from "@tauri-apps/plugin-fs";
-import { computed, h, onMounted, ref } from "vue";
+import { exists, remove, stat } from "@tauri-apps/plugin-fs";
+import { computed, h, onActivated, onMounted, ref } from "vue";
 import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useDownloadStore, type DownloadTab } from "../stores/download";
 
-const { state, refreshLocalSongs, refreshDownloads, addLocalSongFromPath, cancelDownload, consumePreferredTab } =
-  useDownloadStore();
+const {
+  state,
+  downloadingList,
+  downloadedList,
+  refreshLocalSongs,
+  refreshDownloads,
+  addLocalSongFromPath,
+  cancelDownload,
+  consumePreferredTab,
+  clearDownloads,
+  deleteLocalSongs,
+} = useDownloadStore();
 const message = useMessage();
 const activeTab = ref<DownloadTab>("local");
 const addingLocal = ref(false);
+const deletingLocal = ref(false);
+const deletingDownloaded = ref(false);
+const selectedLocalIds = ref<string[]>([]);
+const selectedDownloadedIds = ref<string[]>([]);
 
 // 标签配置，用于实现更现代的视觉展示
 const tabItems = computed(() => [
@@ -23,13 +37,13 @@ const tabItems = computed(() => [
     key: "downloaded" as DownloadTab,
     label: "下载完成",
     description: "可离线播放的歌曲",
-    count: state.downloads.filter((item) => item.status === "success").length,
+    count: downloadedList.value.length,
   },
   {
     key: "downloading" as DownloadTab,
     label: "正在下载",
     description: "当前排队与下载中",
-    count: state.downloads.filter((item) => item.status === "pending" || item.status === "downloading").length,
+    count: downloadingList.value.length,
   },
 ]);
 
@@ -44,6 +58,12 @@ onMounted(() => {
   refreshLocalSongs();
   refreshDownloads();
   activeTab.value = consumePreferredTab("local");
+});
+
+onActivated(() => {
+  refreshLocalSongs();
+  refreshDownloads();
+  activeTab.value = consumePreferredTab(activeTab.value);
 });
 
 async function handleAddLocal() {
@@ -68,7 +88,88 @@ async function handleAddLocal() {
   }
 }
 
+async function handleDeleteLocal() {
+  if (selectedLocalIds.value.length === 0) {
+    message.warning("请先选择要删除的本地歌曲");
+    return;
+  }
+
+  const confirm = window.confirm("删除后本地文件也会被移除，确定继续吗？");
+  if (!confirm) return;
+
+  deletingLocal.value = true;
+  try {
+    const targets = state.localSongs.filter((item) => selectedLocalIds.value.includes(item.id));
+    for (const item of targets) {
+      try {
+        if (await exists(item.path)) {
+          await remove(item.path);
+        }
+      } catch (error) {
+        console.warn("删除本地文件失败，跳过", error);
+      }
+    }
+
+    await deleteLocalSongs(selectedLocalIds.value);
+    selectedLocalIds.value = [];
+    await refreshLocalSongs();
+    message.success(`已删除 ${targets.length} 首本地歌曲`);
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`删除本地歌曲失败：${hint}`);
+  } finally {
+    deletingLocal.value = false;
+  }
+}
+
+async function handleDeleteDownloaded() {
+  if (selectedDownloadedIds.value.length === 0) {
+    message.warning("请先选择要删除的已下载歌曲");
+    return;
+  }
+
+  const confirm = window.confirm("删除后下载的文件将被移除，确定继续吗？");
+  if (!confirm) return;
+
+  deletingDownloaded.value = true;
+  try {
+    const targets = state.downloads.filter(
+      (item) => selectedDownloadedIds.value.includes(item.songId) && item.status === "success"
+    );
+
+    for (const item of targets) {
+      if (!item.filePath) continue;
+      try {
+        if (await exists(item.filePath)) {
+          await remove(item.filePath);
+        }
+      } catch (error) {
+        console.warn("删除已下载文件失败，跳过", error);
+      }
+    }
+
+    await clearDownloads(selectedDownloadedIds.value);
+    selectedDownloadedIds.value = [];
+    await refreshDownloads();
+    message.success(`已删除 ${targets.length} 首已下载歌曲`);
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`删除已下载歌曲失败：${hint}`);
+  } finally {
+    deletingDownloaded.value = false;
+  }
+}
+
+function updateSelectedLocal(keys: (string | number)[]) {
+  selectedLocalIds.value = keys as string[];
+}
+
+function updateSelectedDownloaded(keys: (string | number)[]) {
+  selectedDownloadedIds.value = keys as string[];
+}
+
 const baseColumns = [
+  { type: "selection" as const, width: 60 },
   { title: "歌曲名称", key: "title", minWidth: 180, ellipsis: true },
   { title: "专辑名", key: "album", minWidth: 140, ellipsis: true },
   { title: "大小", key: "size", width: 120, render: (row: any) => formatSize(row.size) },
@@ -117,7 +218,7 @@ const successColumns = [
       </div>
 
       <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-        <div class="grid gap-3 sm:grid-cols-3">
+        <div class="flex flex-wrap gap-3">
           <button
             v-for="item in tabItems"
             :key="item.key"
@@ -137,31 +238,51 @@ const successColumns = [
         </div>
       </div>
 
-      <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div v-if="activeTab === 'local'">
+      <div class="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+        <div v-if="activeTab === 'local'" class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <span class="text-sm text-[#9ab4d8]">已选择 {{ selectedLocalIds.length }} 首本地歌曲</span>
+            <div class="flex items-center gap-2">
+              <n-button quaternary type="error" :loading="deletingLocal" @click="handleDeleteLocal">
+                删除选中
+              </n-button>
+            </div>
+          </div>
           <n-data-table
             :columns="baseColumns"
             :data="state.localSongs"
             :bordered="false"
             :pagination="false"
             :row-key="(row: any) => row.id"
+            :checked-row-keys="selectedLocalIds"
+            @update:checked-row-keys="updateSelectedLocal"
           />
         </div>
 
-        <div v-else-if="activeTab === 'downloaded'">
+        <div v-else-if="activeTab === 'downloaded'" class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <span class="text-sm text-[#9ab4d8]">已选择 {{ selectedDownloadedIds.length }} 首已下载歌曲</span>
+            <div class="flex items-center gap-2">
+              <n-button quaternary type="error" :loading="deletingDownloaded" @click="handleDeleteDownloaded">
+                删除选中
+              </n-button>
+            </div>
+          </div>
           <n-data-table
             :columns="successColumns"
-            :data="state.downloads.filter((item) => item.status === 'success')"
+            :data="downloadedList"
             :bordered="false"
             :pagination="false"
             :row-key="(row: any) => row.songId"
+            :checked-row-keys="selectedDownloadedIds"
+            @update:checked-row-keys="updateSelectedDownloaded"
           />
         </div>
 
         <div v-else>
           <n-data-table
             :columns="activeDownloadingColumns"
-            :data="state.downloads.filter((item) => item.status === 'pending' || item.status === 'downloading')"
+            :data="downloadingList"
             :bordered="false"
             :pagination="false"
             :row-key="(row: any) => row.songId"
@@ -174,7 +295,7 @@ const successColumns = [
 
 <style scoped>
 .tab-card {
-  @apply relative w-full rounded-xl border border-white/5 bg-gradient-to-b from-white/5 to-white/0 px-4 py-3 text-left transition-all duration-200 hover:border-emerald-300/40 hover:bg-white/10;
+  @apply relative min-w-[220px] max-w-[260px] rounded-xl bg-gradient-to-b from-white/5 to-white/0 px-4 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.25)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/10;
 }
 
 .tab-card .active-indicator {
@@ -182,7 +303,7 @@ const successColumns = [
 }
 
 .tab-card.is-active {
-  @apply border-emerald-400/60 bg-emerald-500/10 shadow-[0_8px_30px_rgba(16,185,129,0.25)];
+  @apply ring-2 ring-emerald-400/70 bg-emerald-500/10 shadow-[0_8px_30px_rgba(16,185,129,0.25)];
 }
 
 .tab-card.is-active .active-indicator {
