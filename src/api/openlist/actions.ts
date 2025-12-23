@@ -15,10 +15,10 @@ export async function uploadOpenlistFile(
   }
 
   const authorization = trimmedToken.replace(/^Bearer\s+/i, "");
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("path", targetDir || "/");
-  formData.append("name", file.name);
+  // 构造完整的文件路径（目录 + 文件名）
+  // 确保目录以 / 结尾，避免拼接错误
+  const safeDir = targetDir.endsWith("/") ? targetDir : `${targetDir}/`;
+  const fullPath = `${safeDir}${file.name}`;
 
   // 使用 XMLHttpRequest 便于获取实时上传进度和速度
   return await new Promise((resolve, reject) => {
@@ -42,7 +42,13 @@ export async function uploadOpenlistFile(
       const payload = isJson && xhr.responseText ? JSON.parse(xhr.responseText) : null;
 
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload);
+        // 即使 HTTP 状态码是 200，也要检查业务状态码
+        if (payload && typeof payload.code === 'number' && payload.code !== 200) {
+           const reason = payload.message || payload.error || "未知错误";
+           reject(new Error(`上传失败 [${payload.code}]：${reason}`));
+        } else {
+           resolve(payload);
+        }
       } else {
         const reason = payload?.message || payload?.error || xhr.statusText;
         reject(new Error(`上传失败：${reason}`));
@@ -55,7 +61,16 @@ export async function uploadOpenlistFile(
 
     xhr.open("PUT", `${normalizedBaseUrl}/api/fs/put`);
     xhr.setRequestHeader("Authorization", authorization);
-    xhr.send(formData);
+    
+    // AList 官方文档推荐使用 File-Path 头，并且需要 URL 编码
+    // 用户提示使用 path 头，为兼容性两者都加上，并进行编码以支持中文路径
+    const encodedPath = encodeURIComponent(fullPath);
+    xhr.setRequestHeader("File-Path", encodedPath);
+    xhr.setRequestHeader("path", encodedPath); 
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    
+    // 直接发送文件二进制数据
+    xhr.send(file);
   });
 }
 

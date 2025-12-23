@@ -113,6 +113,8 @@ const processQueue = async () => {
     if (!task) break;
 
     task.status = "uploading";
+    console.log(`[Upload] Starting upload for ${task.name} to ${task.targetDir}`);
+    
     try {
       await uploadOpenlistFile(
         props.baseUrl!,
@@ -130,10 +132,16 @@ const processQueue = async () => {
       task.status = "success";
       emit("uploaded");
     } catch (error) {
+      console.error(`[Upload] Failed to upload ${task.name}:`, error);
       const fallback = error instanceof Error ? error.message : String(error);
       task.status = "error";
-      task.message = fallback;
-      message.error(`文件 ${task.name} 上传失败：${fallback}`);
+      // 优化错误提示
+      if (fallback.includes("storage not found")) {
+         task.message = "当前目录未挂载存储，请进入具体的挂载目录（如 /mnt/music）后再上传";
+      } else {
+         task.message = fallback;
+      }
+      message.error(`文件 ${task.name} 上传失败：${task.message}`);
     }
   }
 
