@@ -20,6 +20,7 @@ export async function uploadOpenlistFile(
   formData.append("path", targetDir || "/");
   formData.append("name", file.name);
 
+  // 使用 Multipart Form 的官方接口 /api/fs/form 进行上传
   // 使用 XMLHttpRequest 便于获取实时上传进度和速度
   return await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -53,7 +54,7 @@ export async function uploadOpenlistFile(
       reject(new Error("请求上传接口失败：网络异常"));
     };
 
-    xhr.open("PUT", `${normalizedBaseUrl}/api/fs/put`);
+    xhr.open("PUT", `${normalizedBaseUrl}/api/fs/form`);
     xhr.setRequestHeader("Authorization", authorization);
     xhr.send(formData);
   });
