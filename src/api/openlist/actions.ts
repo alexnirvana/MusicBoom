@@ -1,6 +1,6 @@
 import { normalizeOpenlistBaseUrl } from "./utils";
 
-// 上传单个文件到指定目录，使用 OpenList 官方接口
+// 上传单个文件到指定目录，使用 WebDAV PUT 到 /dav 路径
 export async function uploadOpenlistFile(
   baseUrl: string,
   token: string,
@@ -14,11 +14,20 @@ export async function uploadOpenlistFile(
     throw new Error("未提供 Token，请重新登录后重试");
   }
 
+  // remotePath 需要保持 WebDAV 规范：必须以 / 开头，且指向已经挂载的存储路径
+  const sanitizedDir = (targetDir || "/").trim() || "/";
+  const ensuredLeadingSlash = sanitizedDir.startsWith("/") ? sanitizedDir : `/${sanitizedDir}`;
+  const dirWithoutTrailingSlash = ensuredLeadingSlash === "/" ? "/" : ensuredLeadingSlash.replace(/\/+$/, "");
+  const remoteFilePath = dirWithoutTrailingSlash === "/" ? `/${file.name}` : `${dirWithoutTrailingSlash}/${file.name}`;
+
+  // 对路径段进行编码，保证包含中文或空格时能够正确上传
+  const encodedPath = remoteFilePath
+    .split("/")
+    .map((segment, index) => (index === 0 ? "" : encodeURIComponent(segment)))
+    .join("/");
+
+  const targetUrl = `${normalizedBaseUrl}/dav${encodedPath}`;
   const authorization = trimmedToken.replace(/^Bearer\s+/i, "");
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("path", targetDir || "/");
-  formData.append("name", file.name);
 
   // 使用 XMLHttpRequest 便于获取实时上传进度和速度
   return await new Promise((resolve, reject) => {
@@ -53,9 +62,10 @@ export async function uploadOpenlistFile(
       reject(new Error("请求上传接口失败：网络异常"));
     };
 
-    xhr.open("PUT", `${normalizedBaseUrl}/api/fs/put`);
+    xhr.open("PUT", targetUrl);
     xhr.setRequestHeader("Authorization", authorization);
-    xhr.send(formData);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    xhr.send(file);
   });
 }
 

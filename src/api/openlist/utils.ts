@@ -8,9 +8,8 @@ export function normalizeOpenlistBaseUrl(baseUrl: string): string {
   try {
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
     const parsed = new URL(normalized);
-    // 统一去掉末尾的斜杠，确保拼接接口路径时不会出现双斜杠
-    const pathname = parsed.pathname.replace(/\/$/, "");
-    return `${parsed.protocol}//${parsed.host}${pathname}`;
+    // 仅保留协议 + 域名（含端口），如果用户误粘贴了形如 /share/xxx 的路径，自动丢弃避免接口 404/500
+    return `${parsed.protocol}//${parsed.host}`;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`无法识别的地址：${reason}`);
