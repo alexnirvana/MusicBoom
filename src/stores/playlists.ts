@@ -10,7 +10,7 @@ import {
 } from "../services/playlist/storage";
 
 interface PlaylistItem {
-  id: number;
+  id: string;
   name: string;
   count: number;
   songs: NavidromeSong[];
@@ -18,7 +18,7 @@ interface PlaylistItem {
 
 interface PlaylistsState {
   items: PlaylistItem[];
-  currentId: number | null;
+  currentId: string | null;
   ready: boolean;
 }
 
@@ -59,7 +59,7 @@ async function createPlaylist(name?: string) {
   return item;
 }
 
-async function renamePlaylist(id: number, name: string) {
+async function renamePlaylist(id: string, name: string) {
   const finalName = name.trim();
   if (!finalName) throw new Error("歌单名称不能为空");
   await dbRenamePlaylist(id, finalName);
@@ -67,7 +67,7 @@ async function renamePlaylist(id: number, name: string) {
   if (found) found.name = finalName;
 }
 
-async function removePlaylist(id: number) {
+async function removePlaylist(id: string) {
   await dbRemovePlaylist(id);
   const index = state.items.findIndex((p) => p.id === id);
   if (index >= 0) state.items.splice(index, 1);
@@ -76,7 +76,7 @@ async function removePlaylist(id: number) {
   }
 }
 
-async function loadSongsForPlaylist(id: number) {
+async function loadSongsForPlaylist(id: string) {
   const found = state.items.find((p) => p.id === id);
   if (!found) return;
   if (found.songs.length > 0) return;
@@ -84,14 +84,13 @@ async function loadSongsForPlaylist(id: number) {
   found.songs = list;
 }
 
-function selectPlaylist(id: number) {
-  const pid = typeof id === "string" ? Number(id) : id;
-  state.currentId = pid;
-  loadSongsForPlaylist(pid).catch(() => {});
+function selectPlaylist(id: string) {
+  state.currentId = id;
+  loadSongsForPlaylist(id).catch(() => {});
 }
 
-async function addSongsToPlaylist(id: number, songs: NavidromeSong[]) {
-  await dbAddSongs(id.toString(), songs);
+async function addSongsToPlaylist(id: string, songs: NavidromeSong[]) {
+  await dbAddSongs(id, songs);
   const found = state.items.find((p) => p.id === id);
   if (!found) return;
   const existingIds = new Set(found.songs.map((s) => s.id));

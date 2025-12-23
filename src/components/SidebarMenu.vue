@@ -69,7 +69,8 @@ const activeKey = ref<string | null>("recommend");
 const router = useRouter();
 const creating = ref(false);
 const newName = ref("");
-const renamingId = ref<number | null>(null);
+const submitting = ref(false);
+const renamingId = ref<string | null>(null);
 const renameValue = ref("");
 const createInputRef = ref<InputInst | null>(null);
 const renameInputRef = ref<InputInst | null>(null);
@@ -119,24 +120,49 @@ function startCreate() {
   });
 }
 
-async function finishCreate() {
-  const name = newName.value.trim();
+async function finishCreate(isBlur = false) {
+  if (submitting.value || !creating.value) return;
+  let name = newName.value.trim();
+  
+  // 失去焦点时，如果名字为空，则使用默认名字
+  if (isBlur && !name) {
+    name = playlists.nextDefaultName();
+  }
+
   if (!name) {
     creating.value = false;
     return;
   }
+  submitting.value = true;
   try {
     await playlists.createPlaylist(name);
     creating.value = false;
     router.push({ name: "playlists" });
   } catch (error) {
+    // 如果是失去焦点（没有明确确认），且创建失败（可能是重名），尝试使用默认名字作为后备方案
+    if (isBlur) {
+      try {
+        const defaultName = playlists.nextDefaultName();
+        // 避免死循环，如果当前名字已经是默认名字且失败了，就不再尝试
+        if (name !== defaultName) {
+          await playlists.createPlaylist(defaultName);
+          creating.value = false;
+          router.push({ name: "playlists" });
+          return;
+        }
+      } catch (e) {
+        // 后备方案也失败，忽略
+      }
+    }
     const reason = error instanceof Error ? error.message : String(error);
     message.error(reason);
     // 保持创建状态，便于继续修改
+  } finally {
+    submitting.value = false;
   }
 }
 
-function openContext(e: MouseEvent, id: number) {
+function openContext(e: MouseEvent, id: string) {
   e.preventDefault();
   contextId.value = id;
   dropdownShow.value = false;
@@ -152,9 +178,9 @@ function closeContext() {
   contextId.value = null;
 }
 
-function startRename(id: number) {
+function startRename(id: string) {
   renamingId.value = id;
-  const target = playlists.state.items.find((p: { id: number }) => p.id === id);
+  const target = playlists.state.items.find((p: { id: string }) => p.id === id);
   renameValue.value = target?.name || "";
   nextTick(() => {
     renameInputRef.value?.focus();
@@ -163,6 +189,7 @@ function startRename(id: number) {
 }
 
 async function finishRename() {
+  if (submitting.value) return;
   const id = renamingId.value;
   if (!id) return;
   const name = renameValue.value.trim();
@@ -170,6 +197,7 @@ async function finishRename() {
     renamingId.value = null;
     return;
   }
+  submitting.value = true;
   try {
     await playlists.renamePlaylist(id, name);
     renamingId.value = null;
@@ -178,6 +206,8 @@ async function finishRename() {
     const reason = error instanceof Error ? error.message : String(error);
     message.error(reason);
     // 保持重命名状态，便于继续修改
+  } finally {
+    submitting.value = false;
   }
 }
 
@@ -211,27 +241,27 @@ function renderMenuLabel(option: any) {
       value: newName.value,
       size: "small",
       autofocus: true,
-      ref: (inst: InputInst | null) => (createInputRef.value = inst),
+      ref: (inst: unknown) => (createInputRef.value = inst as InputInst | null),
       onUpdateValue: (v: string) => (newName.value = v),
       onFocus: (e: FocusEvent) => {
         const el = e.target as HTMLInputElement | null;
         el?.select?.();
       },
-      onBlur: finishCreate,
+      onBlur: () => finishCreate(true),
       onKeyup: (e: KeyboardEvent) => {
-        if (e.key === "Enter") finishCreate();
+        if (e.key === "Enter") finishCreate(false);
       },
     });
   }
   if (typeof option.key === "string" && option.key.startsWith("playlist:")) {
-    const id = Number(option.key.replace(/^playlist:/, ""));
+    const id = option.key.replace(/^playlist:/, "");
     if (renamingId.value === id) {
       return h(NInput, {
         id: "playlist-rename-input",
         value: renameValue.value,
         size: "small",
         autofocus: true,
-        ref: (inst: InputInst | null) => (renameInputRef.value = inst),
+        ref: (inst: unknown) => (renameInputRef.value = inst as InputInst | null),
         onUpdateValue: (v: string) => (renameValue.value = v),
         onFocus: (e: FocusEvent) => {
           const el = e.target as HTMLInputElement | null;
@@ -251,7 +281,7 @@ function renderMenuLabel(option: any) {
       },
       [
         h("span", { class: "truncate" }, option.label as string),
-        h("span", { class: "text-xs text-[#9ab4d8]" }, String(playlists.state.items.find((p: { id: number; count: number }) => p.id === id)?.count ?? 0)),
+        h("span", { class: "text-xs text-[#9ab4d8]" }, String(playlists.state.items.find((p: { id: string; count: number }) => p.id === id)?.count ?? 0)),
       ]
     );
   }
