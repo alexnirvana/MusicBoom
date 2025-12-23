@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { exists, mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
 import { computed, onActivated, onMounted, ref } from "vue";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
-import { getSongs, buildStreamUrl, type FetchSongsOptions, type NavidromeSong } from "../api/navidrome";
+import { getSongs, buildStreamUrl, type NavidromeSong } from "../api/navidrome";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useDownloadStore } from "../stores/download";
 import { useRouter } from "../utils/router-lite";
+import { buildNavidromeContext } from "../utils/navidrome-context";
+import { resolveSongTargetPath } from "../utils/download-path";
 
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
@@ -22,31 +24,16 @@ const songs = ref<NavidromeSong[]>([]);
 const checkedRowKeys = ref<string[]>([]);
 
 const downloadDirLabel = computed(() => settingsState.download.musicDir || "未设置");
+const reservedPaths = new Set<string>();
 const selectedSongs = computed(() =>
   songs.value.filter((item) => checkedRowKeys.value.includes(item.id))
 );
-
-function resolveNavidromeContext(): FetchSongsOptions {
-  const baseUrl = (authState.baseUrl || settingsState.navidrome.baseUrl || "").trim();
-  if (!baseUrl) {
-    throw new Error("缺少 Navidrome 基础地址，请先登录或填写设置");
-  }
-
-  return {
-    baseUrl,
-    bearerToken: null,
-    token: authState.token,
-    salt: authState.salt,
-    username: authState.username || settingsState.navidrome.username,
-    password: settingsState.navidrome.password,
-  };
-}
 
 async function loadSongs() {
   loading.value = true;
   try {
     await settingsReady;
-    const context = resolveNavidromeContext();
+    const context = buildNavidromeContext(authState, settingsState);
     songs.value = await getSongs(context);
     checkedRowKeys.value = songs.value.map((item) => item.id);
   } catch (error) {
@@ -64,30 +51,15 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-async function resolveTargetPath(song: NavidromeSong, ensureDir = false) {
-  const downloadDir = settingsState.download.musicDir.trim();
-  if (!downloadDir) {
-    throw new Error("请先在设置中配置下载目录");
-  }
-
-  const targetDir = settingsState.download.organizeByAlbum
-    ? await join(downloadDir, song.album || "未知专辑")
-    : downloadDir;
-  if (ensureDir) {
-    await mkdir(targetDir, { recursive: true });
-  }
-  const filename = `${song.title || song.id}.mp3`;
-  return join(targetDir, filename);
-}
-
 async function downloadOne(song: NavidromeSong) {
-  await downloadStore.trackDownload(song, async (signal) => {
+  const targetPath = await resolveSongTargetPath(song, settingsState.download, {
+    ensureDir: true,
+    occupied: reservedPaths,
+  });
+
+  await downloadStore.trackDownload(song, async (signal, plannedPath, updateProgress) => {
     await settingsReady;
-    const context = resolveNavidromeContext();
-    const targetPath = await resolveTargetPath(song, true);
-    if (!settingsState.download.overwriteExisting && (await exists(targetPath))) {
-      return { filePath: targetPath };
-    }
+    const context = buildNavidromeContext(authState, settingsState);
 
     let buffer: Uint8Array | null = null;
     const cacheDir = settingsState.download.cacheDir?.trim();
@@ -96,6 +68,7 @@ async function downloadOne(song: NavidromeSong) {
         const cachePath = await join(cacheDir, `${song.id}.mp3`);
         if (await exists(cachePath)) {
           buffer = await readFile(cachePath);
+          updateProgress?.(80);
         }
       } catch (error) {
         console.warn("检查缓存失败，继续远程下载", error);
@@ -108,13 +81,48 @@ async function downloadOne(song: NavidromeSong) {
       if (!response.ok) {
         throw new Error(`下载失败，状态码 ${response.status}`);
       }
-      const arrayBuffer = await response.arrayBuffer();
-      buffer = new Uint8Array(arrayBuffer);
+      const reader = response.body?.getReader();
+      const contentLength = Number(response.headers.get("content-length")) || song.size || 0;
+
+      if (reader) {
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        let fallbackProgress = 5;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            received += value.length;
+
+            if (contentLength > 0) {
+              const percent = 5 + (received / contentLength) * 90;
+              updateProgress?.(percent);
+            } else {
+              fallbackProgress = Math.min(95, fallbackProgress + 3);
+              updateProgress?.(fallbackProgress);
+            }
+          }
+        }
+
+        buffer = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+          buffer.set(chunk, offset);
+          offset += chunk.length;
+        }
+      } else {
+        const arrayBuffer = await response.arrayBuffer();
+        buffer = new Uint8Array(arrayBuffer);
+        updateProgress?.(95);
+      }
     }
 
-    await writeFile(targetPath, buffer);
-    return { filePath: targetPath };
-  });
+    const finalPath = plannedPath || targetPath;
+    await writeFile(finalPath, buffer);
+    return { filePath: finalPath };
+  }, targetPath);
 }
 
 async function filterDownloadTargets(list: NavidromeSong[]) {
@@ -125,18 +133,6 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
 
   for (const song of list) {
     try {
-      const targetPath = await resolveTargetPath(song);
-      if (!settingsState.download.overwriteExisting && (await exists(targetPath))) {
-        console.log(
-          "[批量下载] 跳过已有文件（关闭覆盖）：",
-          song.title || song.id,
-          "目标路径：",
-          targetPath
-        );
-        skipped.push(song.title || song.id);
-        continue;
-      }
-
       const finished = downloadStore.state.downloads.find(
         (item) => item.songId === song.id && item.status === "success" && item.filePath
       );
@@ -158,12 +154,7 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
       }
 
       pending.push(song);
-      console.log(
-        "[批量下载] 加入下载队列：",
-        song.title || song.id,
-        "目标路径：",
-        targetPath
-      );
+      console.log("[批量下载] 加入下载队列：", song.title || song.id);
     } catch (error) {
       console.warn("计算文件路径失败，跳过该歌曲", error);
     }
@@ -222,12 +213,24 @@ function exitPage() {
 
 onMounted(() => {
   loadSongs();
-  downloadStore.refreshDownloads();
+  downloadStore.refreshDownloads().then(() => {
+    downloadStore.state.downloads.forEach((item) => {
+      if (item.filePath) {
+        reservedPaths.add(item.filePath);
+      }
+    });
+  });
 });
 
 onActivated(() => {
   loadSongs();
-  downloadStore.refreshDownloads();
+  downloadStore.refreshDownloads().then(() => {
+    downloadStore.state.downloads.forEach((item) => {
+      if (item.filePath) {
+        reservedPaths.add(item.filePath);
+      }
+    });
+  });
 });
 
 const columns = [
