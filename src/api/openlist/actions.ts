@@ -2,7 +2,15 @@ import { normalizeOpenlistBaseUrl } from "./utils";
 
 // 判定是否在 Tauri 环境运行，用于决定是否走原生上传绕过 CORS
 function isTauriEnvironment(): boolean {
-  return typeof window !== "undefined" && "__TAURI_IPC__" in window;
+  if (typeof window === "undefined") return false;
+
+  // 兼容 Tauri 2.x 的多种探测方式，避免由于特征字段差异导致误判，从而触发浏览器直传被 CORS 拦截
+  return (
+    "__TAURI_IPC__" in window ||
+    "__TAURI_INTERNALS__" in window ||
+    "__TAURI_METADATA__" in window ||
+    navigator.userAgent?.includes("Tauri")
+  );
 }
 
 // 通过 Tauri 原生插件上传文件，可绕过跨域限制并获取上传进度
@@ -109,7 +117,10 @@ export async function uploadOpenlistFile(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(payload);
       } else {
-        const reason = payload?.message || payload?.error || xhr.statusText;
+        const isCorsBlocked = xhr.status === 0 && !payload;
+        const reason = isCorsBlocked
+          ? "目标站点未开放跨域，建议在桌面端使用或让服务器开放 CORS"
+          : payload?.message || payload?.error || xhr.statusText;
         reject(new Error(`上传失败：${reason}`));
       }
     };
