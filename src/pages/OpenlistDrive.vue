@@ -45,6 +45,8 @@ const displayTree = computed<TreeOption[]>(() => {
 });
 
 const files = ref<OpenlistFileEntry[]>([]);
+const sortKey = ref<"name" | "type" | "updated">("updated");
+const sortOrder = ref<"asc" | "desc">("desc");
 const activeDir = ref("/");
 const loading = ref(false);
 const deleting = ref(false);
@@ -58,6 +60,31 @@ const driveAddress = computed(() => state.baseUrl || "尚未填写地址");
 const selectedCount = computed(() => selectedPaths.value.size);
 const hasSelection = computed(() => selectedCount.value > 0);
 const isLoggedIn = computed(() => Boolean(state.token));
+const sortedFiles = computed(() => {
+  // 根据排序选项返回新的文件数组，避免原始列表被直接修改
+  const list = [...files.value];
+  const orderFactor = sortOrder.value === "asc" ? 1 : -1;
+
+  const pickValue = (file: OpenlistFileEntry) => {
+    if (sortKey.value === "updated") return file.updatedTime ?? 0;
+    if (sortKey.value === "type") return file.type;
+    return file.name;
+  };
+
+  return list.sort((a, b) => {
+    const aValue = pickValue(a);
+    const bValue = pickValue(b);
+
+    if (typeof aValue === "number" && typeof bValue === "number") {
+      if (aValue === bValue) return a.name.localeCompare(b.name) * orderFactor;
+      return (aValue - bValue) * orderFactor;
+    }
+
+    const result = String(aValue).localeCompare(String(bValue));
+    if (result === 0) return a.name.localeCompare(b.name) * orderFactor;
+    return result * orderFactor;
+  });
+});
 
 // 递归查找树节点，便于替换其子节点
 const findTreeNode = (nodes: TreeOption[], key: string): TreeOption | null => {
@@ -272,6 +299,23 @@ const setViewMode = (mode: "detail" | "thumb") => {
   viewMode.value = mode;
 };
 
+// 切换排序字段与方向，默认按更新时间倒序
+const toggleSort = (key: "name" | "type" | "updated") => {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === "asc" ? "desc" : "asc";
+    return;
+  }
+
+  sortKey.value = key;
+  sortOrder.value = key === "updated" ? "desc" : "asc";
+};
+
+// 友好的排序标识，便于用户理解当前排序方式
+const renderSortIndicator = (key: "name" | "type" | "updated") => {
+  if (sortKey.value !== key) return "";
+  return sortOrder.value === "asc" ? "↑" : "↓";
+};
+
 // 退出网盘登录并返回登录页
 const handleLogout = async () => {
   await clearSession();
@@ -402,14 +446,41 @@ onActivated(async () => {
                     <thead class="bg-white/5 text-xs uppercase tracking-wide text-[#9ab4d8]">
                       <tr>
                         <th v-if="selectionMode" class="px-4 py-3">选择</th>
-                        <th class="px-4 py-3">文件名</th>
-                        <th class="px-4 py-3">类型</th>
+                        <th class="px-4 py-3">
+                          <button
+                            class="flex items-center gap-1 text-left font-semibold text-white"
+                            type="button"
+                            @click="toggleSort('name')"
+                          >
+                            <span>文件名</span>
+                            <span class="text-xs text-[#9ab4d8]">{{ renderSortIndicator('name') }}</span>
+                          </button>
+                        </th>
+                        <th class="px-4 py-3">
+                          <button
+                            class="flex items-center gap-1 text-left font-semibold text-white"
+                            type="button"
+                            @click="toggleSort('type')"
+                          >
+                            <span>类型</span>
+                            <span class="text-xs text-[#9ab4d8]">{{ renderSortIndicator('type') }}</span>
+                          </button>
+                        </th>
                         <th class="px-4 py-3">大小</th>
-                        <th class="px-4 py-3">更新日期</th>
+                        <th class="px-4 py-3">
+                          <button
+                            class="flex items-center gap-1 text-left font-semibold text-white"
+                            type="button"
+                            @click="toggleSort('updated')"
+                          >
+                            <span>更新日期</span>
+                            <span class="text-xs text-[#9ab4d8]">{{ renderSortIndicator('updated') }}</span>
+                          </button>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="file in files" :key="file.path" class="border-t border-white/5">
+                      <tr v-for="file in sortedFiles" :key="file.path" class="border-t border-white/5">
                         <td v-if="selectionMode" class="px-4 py-3">
                           <input
                             class="h-4 w-4 rounded border-white/30 bg-transparent text-blue-500"
@@ -423,7 +494,7 @@ onActivated(async () => {
                         <td class="px-4 py-3">{{ file.size }}</td>
                         <td class="px-4 py-3">{{ file.updated }}</td>
                       </tr>
-                      <tr v-if="!files.length && !loading">
+                      <tr v-if="!sortedFiles.length && !loading">
                         <td :colspan="selectionMode ? 5 : 4" class="px-4 py-6 text-center text-[#9ab4d8]">
                           当前目录暂无文件
                         </td>
@@ -435,11 +506,11 @@ onActivated(async () => {
 
               <template v-else>
                 <div
-                  v-if="files.length"
+                  v-if="sortedFiles.length"
                   class="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                 >
                   <div
-                    v-for="file in files"
+                    v-for="file in sortedFiles"
                     :key="file.path"
                     class="relative rounded-xl border border-white/5 bg-white/5 p-3 text-sm text-[#c6d2e8]"
                   >
