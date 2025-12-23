@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { exists, remove, stat } from "@tauri-apps/plugin-fs";
+import { exists, readFile, remove, stat, writeFile } from "@tauri-apps/plugin-fs";
+import { join } from "@tauri-apps/api/path";
 import { computed, h, onActivated, onMounted, ref } from "vue";
 import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useDownloadStore, type DownloadTab } from "../stores/download";
+import { useAuthStore } from "../stores/auth";
+import { useSettingsStore } from "../stores/settings";
+import { buildNavidromeContext } from "../utils/navidrome-context";
+import { resolveSongTargetPath } from "../utils/download-path";
+import { buildStreamUrl, getSongById } from "../api/navidrome";
 
 const {
   state,
@@ -12,18 +18,27 @@ const {
   refreshLocalSongs,
   refreshDownloads,
   addLocalSongFromPath,
+  trackDownload,
   cancelDownload,
+  cancelDownloads,
   consumePreferredTab,
   clearDownloads,
   deleteLocalSongs,
 } = useDownloadStore();
+const { state: authState, ready: authReady } = useAuthStore();
+const { state: settingsState, ready: settingsReady } = useSettingsStore();
 const message = useMessage();
 const activeTab = ref<DownloadTab>("local");
 const addingLocal = ref(false);
 const deletingLocal = ref(false);
 const deletingDownloaded = ref(false);
+const cancellingDownloading = ref(false);
+const resuming = ref(false);
 const selectedLocalIds = ref<string[]>([]);
 const selectedDownloadedIds = ref<string[]>([]);
+const selectedDownloadingIds = ref<string[]>([]);
+const reservedDownloadPaths = new Set<string>();
+const resumedSongIds = new Set<string>();
 
 // 标签配置，用于实现更现代的视觉展示
 const tabItems = computed(() => [
@@ -56,13 +71,27 @@ function formatSize(bytes?: number) {
 
 onMounted(() => {
   refreshLocalSongs();
-  refreshDownloads();
+  refreshDownloads().then(() => {
+    state.downloads.forEach((item) => {
+      if (item.filePath) {
+        reservedDownloadPaths.add(item.filePath);
+      }
+    });
+    handleResumeDownloads();
+  });
   activeTab.value = consumePreferredTab("local");
 });
 
 onActivated(() => {
   refreshLocalSongs();
-  refreshDownloads();
+  refreshDownloads().then(() => {
+    state.downloads.forEach((item) => {
+      if (item.filePath) {
+        reservedDownloadPaths.add(item.filePath);
+      }
+    });
+    handleResumeDownloads();
+  });
   activeTab.value = consumePreferredTab(activeTab.value);
 });
 
@@ -160,12 +189,142 @@ async function handleDeleteDownloaded() {
   }
 }
 
+async function handleCancelDownloading() {
+  if (selectedDownloadingIds.value.length === 0) {
+    message.warning("请先选择要取消的下载任务");
+    return;
+  }
+
+  cancellingDownloading.value = true;
+  try {
+    await cancelDownloads(selectedDownloadingIds.value);
+    selectedDownloadingIds.value = [];
+    await refreshDownloads();
+    message.success("所选下载任务已取消");
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`取消下载任务失败：${hint}`);
+  } finally {
+    cancellingDownloading.value = false;
+  }
+}
+
+async function handleResumeDownloads() {
+  if (resuming.value) return;
+  resuming.value = true;
+  try {
+    await Promise.all([authReady, settingsReady]);
+    const context = buildNavidromeContext(authState, settingsState);
+    const interrupted = state.downloads.filter(
+      (item) => (item.status === "pending" || item.status === "downloading") && !resumedSongIds.has(item.songId)
+    );
+
+    if (interrupted.length === 0) return;
+
+    for (const item of interrupted) {
+      try {
+        const song = await getSongById({ ...context, songId: item.songId });
+        const targetPath =
+          item.filePath ||
+          (await resolveSongTargetPath(song, settingsState.download, {
+            ensureDir: true,
+            occupied: reservedDownloadPaths,
+          }));
+
+        reservedDownloadPaths.add(targetPath);
+        resumedSongIds.add(item.songId);
+
+        await trackDownload(
+          song,
+          async (signal, plannedPath, updateProgress) => {
+            let buffer: Uint8Array | null = null;
+            const cacheDir = settingsState.download.cacheDir?.trim();
+            if (cacheDir) {
+              try {
+                const cachePath = await join(cacheDir, `${song.id}.mp3`);
+                if (await exists(cachePath)) {
+                  buffer = await readFile(cachePath);
+                  updateProgress?.(80);
+                }
+              } catch (error) {
+                console.warn("检查缓存失败，继续远程下载", error);
+              }
+            }
+
+            if (!buffer) {
+              const streamUrl = buildStreamUrl({ ...context, songId: song.id });
+              const response = await fetch(streamUrl, { signal });
+              if (!response.ok) {
+                throw new Error(`下载失败，状态码 ${response.status}`);
+              }
+              const reader = response.body?.getReader();
+              const contentLength = Number(response.headers.get("content-length")) || song.size || 0;
+
+              if (reader) {
+                const chunks: Uint8Array[] = [];
+                let received = 0;
+                let fallbackProgress = 5;
+
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  if (value) {
+                    chunks.push(value);
+                    received += value.length;
+
+                    if (contentLength > 0) {
+                      const percent = 5 + (received / contentLength) * 90;
+                      updateProgress?.(percent);
+                    } else {
+                      fallbackProgress = Math.min(95, fallbackProgress + 3);
+                      updateProgress?.(fallbackProgress);
+                    }
+                  }
+                }
+
+                buffer = new Uint8Array(received);
+                let offset = 0;
+                for (const chunk of chunks) {
+                  buffer.set(chunk, offset);
+                  offset += chunk.length;
+                }
+              } else {
+                const arrayBuffer = await response.arrayBuffer();
+                buffer = new Uint8Array(arrayBuffer);
+                updateProgress?.(95);
+              }
+            }
+
+            const finalPath = plannedPath || targetPath;
+            await writeFile(finalPath, buffer);
+            return { filePath: finalPath };
+          },
+          targetPath
+        );
+      } catch (error) {
+        const hint = error instanceof Error ? error.message : String(error);
+        message.error(`恢复「${item.title || item.songId}」下载失败：${hint}`);
+      }
+    }
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`恢复下载任务失败：${hint}`);
+  } finally {
+    resuming.value = false;
+    refreshDownloads();
+  }
+}
+
 function updateSelectedLocal(keys: (string | number)[]) {
   selectedLocalIds.value = keys as string[];
 }
 
 function updateSelectedDownloaded(keys: (string | number)[]) {
   selectedDownloadedIds.value = keys as string[];
+}
+
+function updateSelectedDownloading(keys: (string | number)[]) {
+  selectedDownloadingIds.value = keys as string[];
 }
 
 const baseColumns = [
@@ -279,13 +438,26 @@ const successColumns = [
           />
         </div>
 
-        <div v-else>
+        <div v-else class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <span class="text-sm text-[#9ab4d8]">已选择 {{ selectedDownloadingIds.length }} 首正在下载的歌曲</span>
+            <div class="flex items-center gap-2">
+              <n-button quaternary type="warning" :loading="cancellingDownloading" @click="handleCancelDownloading">
+                取消选中
+              </n-button>
+              <n-button quaternary type="primary" :loading="resuming" @click="handleResumeDownloads">
+                恢复未完成
+              </n-button>
+            </div>
+          </div>
           <n-data-table
             :columns="activeDownloadingColumns"
             :data="downloadingList"
             :bordered="false"
             :pagination="false"
             :row-key="(row: any) => row.songId"
+            :checked-row-keys="selectedDownloadingIds"
+            @update:checked-row-keys="updateSelectedDownloading"
           />
         </div>
       </div>

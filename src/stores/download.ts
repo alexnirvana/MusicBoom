@@ -102,27 +102,47 @@ async function deleteLocalSongs(ids: string[]) {
 
 async function trackDownload(
   song: NavidromeSong,
-  updater: (signal: AbortSignal) => Promise<{ filePath?: string | null }>
+  updater: (
+    signal: AbortSignal,
+    targetPath?: string,
+    updateProgress?: (percent: number) => void
+  ) => Promise<{ filePath?: string | null }>,
+  targetPath?: string
 ) {
-  const task: DownloadTask = {
-    songId: song.id,
-    title: song.title,
-    album: song.album,
-    size: song.size || 0,
-    status: "pending",
-    progress: 0,
-  };
+  // 尝试复用已有的下载记录，方便恢复时保持路径一致
+  const existing = state.downloads.find((item) => item.songId === song.id);
+  const task: DownloadTask = existing
+    ? { ...existing }
+    : {
+        songId: song.id,
+        title: song.title,
+        album: song.album,
+        size: song.size || 0,
+        status: "pending",
+        progress: 0,
+      };
+
+  if (targetPath) {
+    task.filePath = targetPath;
+  }
+
   markDownload(task);
+
+  const updateProgress = (percent: number) => {
+    const normalized = Math.min(99, Math.max(0, Math.round(percent)));
+    if (normalized === task.progress) return;
+    task.progress = normalized;
+    markDownload(task);
+  };
 
   const controller = new AbortController();
   task.controller = controller;
   task.status = "downloading";
-  task.progress = 5;
-  markDownload(task);
-  await upsertDownloadRecord(task);
+  task.progress = Math.max(task.progress || 0, 5);
+  await persistDownload(task);
 
   try {
-    const result = await updater(controller.signal);
+    const result = await updater(controller.signal, task.filePath || targetPath, updateProgress);
     if (controller.signal.aborted) {
       task.status = "cancelled";
       task.progress = 0;
@@ -132,7 +152,7 @@ async function trackDownload(
 
     task.status = "success";
     task.progress = 100;
-    task.filePath = result.filePath || task.filePath;
+    task.filePath = result.filePath || task.filePath || targetPath;
     await persistDownload(task);
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
@@ -143,16 +163,23 @@ async function trackDownload(
   }
 }
 
-function cancelDownload(songId: string) {
+async function cancelDownload(songId: string) {
   const target = state.downloads.find((item) => item.songId === songId);
   target?.controller?.abort();
   if (target) {
     target.status = "cancelled";
     target.progress = 0;
-    // 立即从数据库中删除或更新状态，避免刷新后又回来
-    persistDownload(target); 
+    // 立即同步数据库，避免刷新后又自动恢复
+    await persistDownload(target);
     // 从当前列表中移除，给用户即时反馈
-    state.downloads = state.downloads.filter(item => item.songId !== songId);
+    state.downloads = state.downloads.filter((item) => item.songId !== songId);
+  }
+}
+
+async function cancelDownloads(songIds: string[]) {
+  if (!songIds.length) return;
+  for (const id of songIds) {
+    await cancelDownload(id);
   }
 }
 
@@ -173,6 +200,7 @@ export function useDownloadStore() {
     addLocalSongFromPath,
     trackDownload,
     cancelDownload,
+    cancelDownloads,
     clearDownload,
     clearDownloads,
     deleteLocalSongs,
