@@ -105,6 +105,7 @@ async function fetchSongsByAlbum(
       album: item.album || album.name || "未知专辑",
       duration: item.duration || 0,
       coverUrl: buildCoverUrl(baseUrl, auth, item.coverArt || album.coverArt),
+      size: item.size,
     }));
 }
 
@@ -218,6 +219,7 @@ export async function getSongById(
         album: normalized.album || "未知专辑",
         duration: normalized.duration || 0,
         coverUrl: buildCoverUrl(baseUrl, auth, normalized.coverArt),
+        size: normalized.size,
       };
     }
   }

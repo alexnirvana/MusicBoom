@@ -47,6 +47,7 @@ const routeMap: Record<string, { name: string }> = {
   recommend: { name: "home" },
   mine: { name: "my-music" },
   favorite: { name: "favorites" },
+  local: { name: "local-download" },
   openlist: { name: "openlist-drive" },
 };
 

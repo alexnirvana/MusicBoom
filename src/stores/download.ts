@@ -1,0 +1,142 @@
+// 下载与本地音乐的状态管理，集中处理批量下载、进度与本地歌曲列表
+import { computed, reactive } from "vue";
+import type { NavidromeSong } from "../types/navidrome";
+import type { DownloadRecord, DownloadStatus, LocalSongRecord } from "../services/library";
+import {
+  listDownloadRecords,
+  listLocalSongs,
+  removeDownloadRecord,
+  upsertDownloadRecord,
+  upsertLocalSong,
+} from "../services/library";
+
+interface DownloadTask extends DownloadRecord {
+  controller?: AbortController;
+}
+
+interface DownloadState {
+  localSongs: LocalSongRecord[];
+  downloads: DownloadTask[];
+  loading: boolean;
+}
+
+const state = reactive<DownloadState>({
+  localSongs: [],
+  downloads: [],
+  loading: false,
+});
+
+async function refreshLocalSongs() {
+  state.localSongs = await listLocalSongs();
+}
+
+async function refreshDownloads(status?: DownloadStatus) {
+  const records = await listDownloadRecords(status);
+  state.downloads = records.map((item) => ({ ...item }));
+}
+
+async function addLocalSongFromPath(path: string, size: number) {
+  const filename = path.split(/\\|\//).pop() || "未知文件";
+  const title = filename.replace(/\.[^.]+$/, "");
+  const record: LocalSongRecord = {
+    id: crypto.randomUUID(),
+    title,
+    album: "本地文件",
+    artist: "本地文件",
+    path,
+    size,
+  };
+  await upsertLocalSong(record);
+  await refreshLocalSongs();
+}
+
+function markDownload(task: DownloadTask) {
+  const existingIndex = state.downloads.findIndex((item) => item.songId === task.songId);
+  if (existingIndex >= 0) {
+    state.downloads.splice(existingIndex, 1, task);
+  } else {
+    state.downloads.push(task);
+  }
+}
+
+async function persistDownload(task: DownloadTask) {
+  await upsertDownloadRecord(task);
+  markDownload(task);
+}
+
+async function clearDownload(songId: string) {
+  await removeDownloadRecord(songId);
+  state.downloads = state.downloads.filter((item) => item.songId !== songId);
+}
+
+async function trackDownload(
+  song: NavidromeSong,
+  updater: (signal: AbortSignal) => Promise<{ filePath?: string | null }>
+) {
+  const task: DownloadTask = {
+    songId: song.id,
+    title: song.title,
+    album: song.album,
+    size: song.size || 0,
+    status: "pending",
+    progress: 0,
+  };
+  markDownload(task);
+
+  const controller = new AbortController();
+  task.controller = controller;
+  task.status = "downloading";
+  task.progress = 5;
+  markDownload(task);
+  await upsertDownloadRecord(task);
+
+  try {
+    const result = await updater(controller.signal);
+    if (controller.signal.aborted) {
+      task.status = "cancelled";
+      task.progress = 0;
+      await persistDownload(task);
+      return;
+    }
+
+    task.status = "success";
+    task.progress = 100;
+    task.filePath = result.filePath || task.filePath;
+    await persistDownload(task);
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    task.status = "failed";
+    task.progress = 0;
+    task.errorMessage = hint;
+    await persistDownload(task);
+  }
+}
+
+function cancelDownload(songId: string) {
+  const target = state.downloads.find((item) => item.songId === songId);
+  target?.controller?.abort();
+  if (target) {
+    target.status = "cancelled";
+    target.progress = 0;
+  }
+}
+
+const downloadingList = computed(() =>
+  state.downloads.filter((item) => item.status === "pending" || item.status === "downloading")
+);
+const downloadedList = computed(() => state.downloads.filter((item) => item.status === "success"));
+
+export function useDownloadStore() {
+  return {
+    state,
+    downloadingList,
+    downloadedList,
+    refreshLocalSongs,
+    refreshDownloads,
+    addLocalSongFromPath,
+    trackDownload,
+    cancelDownload,
+    clearDownload,
+  };
+}
+
