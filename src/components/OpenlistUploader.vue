@@ -187,7 +187,7 @@ const processQueue = async () => {
       class="hidden"
       @change="handleFileChange"
     />
-
+<n-scrollbar style="max-height: 420px">
     <div v-if="uploadQueue.length" class="mt-4 space-y-3">
       <div class="flex items-center justify-between text-sm text-[#9ab4d8]">
         <span>上传队列</span>
@@ -222,5 +222,6 @@ const processQueue = async () => {
         <p v-else-if="task.status === 'success'" class="mt-2 text-xs text-green-400">上传完成</p>
       </div>
     </div>
+    </n-scrollbar>
   </div>
 </template>
