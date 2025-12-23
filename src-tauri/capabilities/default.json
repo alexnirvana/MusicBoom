@@ -62,6 +62,17 @@
         { "path": "$HOME/**" }
       ]
     },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
     "http:default",
     "upload:default",
     "sql:default",
