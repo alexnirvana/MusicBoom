@@ -112,6 +112,12 @@ const handleExpandedUpdate = (keys: string[]) => {
 
 function startCreate() {
   if (creating.value) return;
+  
+  // 确保歌单菜单已展开
+  if (!expandedKeys.value.includes("playlist")) {
+    expandedKeys.value = [...expandedKeys.value, "playlist"];
+  }
+  
   creating.value = true;
   newName.value = playlists.nextDefaultName();
   nextTick(() => {
@@ -342,7 +348,7 @@ watch(
         <p class="m-0 text-lg font-semibold text-white">Navi 风格</p>
       </div>
     </div>
-    <div class="flex-1 overflow-y-auto px-3 pb-4">
+    <div class="flex-1 overflow-y-auto px-3">
       <n-menu
         :value="activeKey"
         :options="menuOptions"
@@ -350,7 +356,6 @@ watch(
         :indent="18"
         :expanded-keys="expandedKeys"
         :render-label="renderMenuLabel"
-        accordion
         @update:value="handleMenuUpdate"
         @update:expanded-keys="handleExpandedUpdate"
       />
@@ -366,11 +371,33 @@ watch(
       />
     </div>
   </div>
+
 </template>
 
 <style scoped>
 /* 防止菜单区域被拖拽，保持交互正常 */
 .no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* 确保 n-menu 背景透明，避免颜色分层 */
+:deep(.n-menu) {
+  background-color: transparent !important;
+}
+
+/* 确保滚动容器背景透明 */
+:deep(.n-scrollbar) {
+  background-color: transparent !important;
+}
+
+/* 优化菜单项样式 */
+:deep(.n-menu-item) {
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+/* 优化菜单子标题样式 */
+:deep(.n-menu-item-content-header) {
+  font-weight: 500;
 }
 </style>

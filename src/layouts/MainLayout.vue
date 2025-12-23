@@ -23,6 +23,8 @@ const props = withDefaults(defineProps<{ hideSidebar?: boolean }>(), {
         :native-scrollbar="false"
         width="240"
         class="relative z-10"
+        content-style="height: 100%;"
+        :scrollbar-props="{ 'content-style': 'height: 100%;' }"
       >
         <SidebarMenu />
       </n-layout-sider>
