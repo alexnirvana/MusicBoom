@@ -7,41 +7,77 @@ import {
   HomeOutline,
   ListOutline,
   SpeedometerOutline,
+  AddOutline,
+  Play,
+  TrashOutline,
+  CreateOutline,
 } from "@vicons/ionicons5";
-import { h, ref, watch } from "vue";
-import { NIcon } from "naive-ui";
+import { computed, h, nextTick, ref, watch } from "vue";
+import { NDropdown, NIcon, NInput, NButton, useMessage } from "naive-ui";
+import type { InputInst } from "naive-ui";
 import { useRouter } from "../utils/router-lite";
+import { usePlaylistsStore } from "../stores/playlists";
 
 // 菜单图标渲染，保持 Naive UI 风格
 const renderIcon = (icon: any) => () => h(NIcon, null, { default: () => h(icon) });
 
+const message = useMessage();
+const playlists = usePlaylistsStore();
+
 // 左侧菜单选项
-const menuOptions = [
-  {
-    label: "在线音乐",
-    key: "online",
-    children: [
-      { label: "推荐", key: "recommend", icon: renderIcon(HomeOutline) },
-      { label: "我的音乐", key: "mine", icon: renderIcon(DiscOutline) },
-      { label: "我喜欢", key: "favorite", icon: renderIcon(HeartOutline) },
-      { label: "本地和下载", key: "local", icon: renderIcon(AlbumsOutline) },
-      { label: "最近播放", key: "recent", icon: renderIcon(ListOutline) },
-      { label: "最多播放", key: "most", icon: renderIcon(SpeedometerOutline) },
-      { label: "评分排行", key: "rank", icon: renderIcon(SpeedometerOutline) },
-      { label: "我的网盘", key: "openlist", icon: renderIcon(CloudOutline) },
-    ],
-  },
-  {
-    label: "歌单",
-    key: "playlist",
-    children: [{ label: "示例的歌单", key: "sample-playlist", icon: renderIcon(ListOutline) }],
-  },
-];
+const menuOptions = computed(() => {
+  const playlistChildren = [];
+  if (creating.value) {
+    playlistChildren.push({
+      label: "创建歌单",
+      key: "playlist:create",
+    });
+  }
+  for (const p of playlists.state.items) {
+    playlistChildren.push({
+      label: p.name,
+      key: `playlist:${p.id}`,
+      icon: renderIcon(ListOutline),
+    });
+  }
+  return [
+    {
+      label: "在线音乐",
+      key: "online",
+      children: [
+        { label: "推荐", key: "recommend", icon: renderIcon(HomeOutline) },
+        { label: "我的音乐", key: "mine", icon: renderIcon(DiscOutline) },
+        { label: "我喜欢", key: "favorite", icon: renderIcon(HeartOutline) },
+        { label: "本地和下载", key: "local", icon: renderIcon(AlbumsOutline) },
+        { label: "最近播放", key: "recent", icon: renderIcon(ListOutline) },
+        { label: "最多播放", key: "most", icon: renderIcon(SpeedometerOutline) },
+        { label: "评分排行", key: "rank", icon: renderIcon(SpeedometerOutline) },
+        { label: "我的网盘", key: "openlist", icon: renderIcon(CloudOutline) },
+      ],
+    },
+    {
+      label: "歌单",
+      key: "playlist",
+      children: playlistChildren,
+    },
+  ];
+});
 
 // 记录展开与选中状态
 const expandedKeys = ref<string[]>(["online", "playlist"]);
 const activeKey = ref<string | null>("recommend");
 const router = useRouter();
+const creating = ref(false);
+const newName = ref("");
+const renamingId = ref<number | null>(null);
+const renameValue = ref("");
+const createInputRef = ref<InputInst | null>(null);
+const renameInputRef = ref<InputInst | null>(null);
+
+const dropdownShow = ref(false);
+const dropdownX = ref(0);
+const dropdownY = ref(0);
+const contextId = ref<string | null>(null);
 
 const routeMap: Record<string, { name: string }> = {
   recommend: { name: "home" },
@@ -54,6 +90,15 @@ const routeMap: Record<string, { name: string }> = {
 // 处理菜单选中与展开
 const handleMenuUpdate = (val: string) => {
   activeKey.value = val;
+  if (val.startsWith("playlist:")) {
+    const id = val.replace(/^playlist:/, "");
+    playlists.selectPlaylist(id);
+    router.push({ name: "playlists" });
+    return;
+  }
+  if (val === "playlist:create") {
+    return;
+  }
   const target = routeMap[val];
   if (target) {
     router.push(target);
@@ -63,6 +108,175 @@ const handleMenuUpdate = (val: string) => {
 const handleExpandedUpdate = (keys: string[]) => {
   expandedKeys.value = keys;
 };
+
+function startCreate() {
+  if (creating.value) return;
+  creating.value = true;
+  newName.value = playlists.nextDefaultName();
+  nextTick(() => {
+    createInputRef.value?.focus();
+    createInputRef.value?.select?.();
+  });
+}
+
+async function finishCreate() {
+  const name = newName.value.trim();
+  if (!name) {
+    creating.value = false;
+    return;
+  }
+  try {
+    await playlists.createPlaylist(name);
+    creating.value = false;
+    router.push({ name: "playlists" });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    message.error(reason);
+    // 保持创建状态，便于继续修改
+  }
+}
+
+function openContext(e: MouseEvent, id: number) {
+  e.preventDefault();
+  contextId.value = id;
+  dropdownShow.value = false;
+  nextTick(() => {
+    dropdownX.value = e.clientX;
+    dropdownY.value = e.clientY;
+    dropdownShow.value = true;
+  });
+}
+
+function closeContext() {
+  dropdownShow.value = false;
+  contextId.value = null;
+}
+
+function startRename(id: number) {
+  renamingId.value = id;
+  const target = playlists.state.items.find((p: { id: number }) => p.id === id);
+  renameValue.value = target?.name || "";
+  nextTick(() => {
+    renameInputRef.value?.focus();
+    renameInputRef.value?.select?.();
+  });
+}
+
+async function finishRename() {
+  const id = renamingId.value;
+  if (!id) return;
+  const name = renameValue.value.trim();
+  if (!name) {
+    renamingId.value = null;
+    return;
+  }
+  try {
+    await playlists.renamePlaylist(id, name);
+    renamingId.value = null;
+    message.success("已重命名歌单");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    message.error(reason);
+    // 保持重命名状态，便于继续修改
+  }
+}
+
+function renderMenuLabel(option: any) {
+  if (option.key === "playlist") {
+    return h(
+      "div",
+      { class: "flex items-center justify-between w-full" },
+      [
+        h("span", null, option.label as string),
+        h(
+          NButton,
+          {
+            quaternary: true,
+            circle: true,
+            size: "tiny",
+            title: "新建歌单",
+            onClick: (e: MouseEvent) => {
+              e.stopPropagation();
+              startCreate();
+            },
+          },
+          { default: () => h(NIcon, null, { default: () => h(AddOutline) }) }
+        ),
+      ]
+    );
+  }
+  if (option.key === "playlist:create") {
+    return h(NInput, {
+      id: "playlist-create-input",
+      value: newName.value,
+      size: "small",
+      autofocus: true,
+      ref: (inst: InputInst | null) => (createInputRef.value = inst),
+      onUpdateValue: (v: string) => (newName.value = v),
+      onFocus: (e: FocusEvent) => {
+        const el = e.target as HTMLInputElement | null;
+        el?.select?.();
+      },
+      onBlur: finishCreate,
+      onKeyup: (e: KeyboardEvent) => {
+        if (e.key === "Enter") finishCreate();
+      },
+    });
+  }
+  if (typeof option.key === "string" && option.key.startsWith("playlist:")) {
+    const id = Number(option.key.replace(/^playlist:/, ""));
+    if (renamingId.value === id) {
+      return h(NInput, {
+        id: "playlist-rename-input",
+        value: renameValue.value,
+        size: "small",
+        autofocus: true,
+        ref: (inst: InputInst | null) => (renameInputRef.value = inst),
+        onUpdateValue: (v: string) => (renameValue.value = v),
+        onFocus: (e: FocusEvent) => {
+          const el = e.target as HTMLInputElement | null;
+          el?.select?.();
+        },
+        onBlur: finishRename,
+        onKeyup: (e: KeyboardEvent) => {
+          if (e.key === "Enter") finishRename();
+        },
+      });
+    }
+    return h(
+      "div",
+      {
+        class: "flex items-center justify-between w-full",
+        onContextmenu: (e: MouseEvent) => openContext(e, id),
+      },
+      [
+        h("span", { class: "truncate" }, option.label as string),
+        h("span", { class: "text-xs text-[#9ab4d8]" }, String(playlists.state.items.find((p: { id: number; count: number }) => p.id === id)?.count ?? 0)),
+      ]
+    );
+  }
+  return option.label as string;
+}
+
+const dropdownOptions = [
+  { label: "播放", key: "play", icon: renderIcon(Play) },
+  { label: "删除", key: "delete", icon: renderIcon(TrashOutline) },
+  { label: "重命名", key: "rename", icon: renderIcon(CreateOutline) },
+];
+
+function handleDropdownSelect(key: string | number) {
+  const id = contextId.value;
+  closeContext();
+  if (!id) return;
+  if (key === "play") {
+    playlists.selectPlaylist(id);
+    router.push({ name: "playlists" });
+  } else if (key === "delete") {
+    playlists.removePlaylist(id).then(() => message.success("已删除歌单"));
+  } else if (key === "rename") {
+    startRename(id);
+  }
+}
 
 watch(
   () => router.currentRoute.value.name,
@@ -100,9 +314,20 @@ watch(
         :collapsed-width="0"
         :indent="18"
         :expanded-keys="expandedKeys"
+        :render-label="renderMenuLabel"
         accordion
         @update:value="handleMenuUpdate"
         @update:expanded-keys="handleExpandedUpdate"
+      />
+      <n-dropdown
+        trigger="manual"
+        placement="bottom-start"
+        :x="dropdownX"
+        :y="dropdownY"
+        :show="dropdownShow"
+        :options="dropdownOptions"
+        @select="handleDropdownSelect"
+        @clickoutside="closeContext"
       />
     </div>
   </div>
