@@ -13,6 +13,7 @@ export interface OpenlistFileEntry {
   type: string;
   size: string;
   updated: string;
+  updatedTime?: number;
   isDir: boolean;
   path: string;
 }
@@ -83,11 +84,13 @@ export async function listOpenlistDirectory(
     const rawList: RawOpenlistEntry[] = payload.data?.content || [];
     const entries: OpenlistFileEntry[] = rawList.map((item) => {
       const isDir = Boolean(item.is_dir);
+      const updatedTime = item.modified ? new Date(item.modified).getTime() : undefined;
       return {
         name: isDir ? `${item.name}/` : item.name,
         type: isDir ? "文件夹" : "文件",
         size: isDir ? "--" : formatSize(item.size),
         updated: formatDate(item.modified),
+        updatedTime,
         isDir,
         path: joinPath(currentPath, item.name),
       };
