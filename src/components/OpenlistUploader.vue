@@ -56,6 +56,12 @@ const handleFiles = (files: File[]) => {
     return;
   }
 
+  // 根目录仅用于展示存储列表，实际上传需进入具体存储路径
+  if (!currentDir.value || currentDir.value === "/") {
+    message.warning("请先进入某个存储目录，再尝试上传文件");
+    return;
+  }
+
   const tasks = files.map<UploadItem>((file) => ({
     id: `${Date.now()}-${file.name}-${Math.random().toString(16).slice(2)}`,
     name: file.name,
