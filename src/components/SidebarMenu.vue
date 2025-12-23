@@ -302,7 +302,12 @@ function handleDropdownSelect(key: string | number) {
     playlists.selectPlaylist(id);
     router.push({ name: "playlists" });
   } else if (key === "delete") {
-    playlists.removePlaylist(id).then(() => message.success("已删除歌单"));
+    playlists.removePlaylist(id)
+      .then(() => message.success("已删除歌单"))
+      .catch((error) => {
+        console.error('删除歌单失败:', error);
+        message.error("删除歌单失败，请重试");
+      });
   } else if (key === "rename") {
     startRename(id);
   }

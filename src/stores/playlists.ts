@@ -68,11 +68,17 @@ async function renamePlaylist(id: string, name: string) {
 }
 
 async function removePlaylist(id: string) {
-  await dbRemovePlaylist(id);
-  const index = state.items.findIndex((p) => p.id === id);
-  if (index >= 0) state.items.splice(index, 1);
-  if (state.currentId === id) {
-    state.currentId = state.items[0]?.id || null;
+  try {
+    await dbRemovePlaylist(id);
+    // 只有数据库删除成功后才更新前端状态
+    const index = state.items.findIndex((p) => p.id === id);
+    if (index >= 0) state.items.splice(index, 1);
+    if (state.currentId === id) {
+      state.currentId = state.items[0]?.id || null;
+    }
+  } catch (error) {
+    console.error('删除歌单失败:', error);
+    throw error; // 重新抛出错误，让前端处理
   }
 }
 
