@@ -6,70 +6,76 @@
   "permissions": [
     "core:path:default",
     "opener:default",
-    "fs:default",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        "fs:default",
+        {
+          "identifier": "fs:scope",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
-    {
-      "identifier": "fs:allow-stat",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        {
+          "identifier": "fs:allow-stat",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
-    {
-      "identifier": "fs:allow-mkdir",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        {
+          "identifier": "fs:allow-mkdir",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
-    {
-      "identifier": "fs:allow-exists",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        {
+          "identifier": "fs:allow-exists",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        {
+          "identifier": "fs:allow-write-file",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
-    {
-      "identifier": "fs:allow-remove",
-      "allow": [
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$APPLOCALDATA/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DOCUMENT/**" },
+        {
+          "identifier": "fs:allow-remove",
+          "allow": [
+            { "path": "**" },
+            { "path": "$APPCACHE/**" },
+            { "path": "$APPDATA/**" },
+            { "path": "$APPLOCALDATA/**" },
+            { "path": "$DOWNLOAD/**" },
+            { "path": "$DOCUMENT/**" },
         { "path": "$HOME/**" }
       ]
     },
