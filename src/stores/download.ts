@@ -10,6 +10,9 @@ import {
   upsertLocalSong,
 } from "../services/library";
 
+// 下载页使用的标签类型，方便在页面间传递意图
+export type DownloadTab = "local" | "downloaded" | "downloading";
+
 interface DownloadTask extends DownloadRecord {
   controller?: AbortController;
 }
@@ -18,6 +21,8 @@ interface DownloadState {
   localSongs: LocalSongRecord[];
   downloads: DownloadTask[];
   loading: boolean;
+  // 记录希望展示的标签，便于从批量下载页跳转后自动切换
+  preferredTab?: DownloadTab;
 }
 
 const state = reactive<DownloadState>({
@@ -25,6 +30,18 @@ const state = reactive<DownloadState>({
   downloads: [],
   loading: false,
 });
+
+// 设置希望在本地与下载页默认展示的标签
+function setPreferredTab(tab: DownloadTab) {
+  state.preferredTab = tab;
+}
+
+// 读取并清除预设的标签，避免影响后续的普通访问
+function consumePreferredTab(defaultTab: DownloadTab = "local") {
+  const tab = state.preferredTab ?? defaultTab;
+  state.preferredTab = undefined;
+  return tab;
+}
 
 async function refreshLocalSongs() {
   state.localSongs = await listLocalSongs();
@@ -131,6 +148,8 @@ export function useDownloadStore() {
     state,
     downloadingList,
     downloadedList,
+    setPreferredTab,
+    consumePreferredTab,
     refreshLocalSongs,
     refreshDownloads,
     addLocalSongFromPath,

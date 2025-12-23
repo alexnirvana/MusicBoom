@@ -120,10 +120,12 @@ async function handleDownloadSelected() {
 
   downloading.value = true;
   try {
-    for (const song of selectedSongs.value) {
-      await downloadOne(song);
-    }
-    message.success("下载任务已提交，稍后可在本地和下载中查看");
+    // 启动全部下载任务后立即跳转，确保能立刻看到进度
+    const tasks = selectedSongs.value.map((song) => downloadOne(song));
+    downloadStore.setPreferredTab("downloading");
+    router.push({ name: "local-download" });
+    await Promise.allSettled(tasks);
+    message.success("下载任务已提交，已为你跳转到下载进度页");
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     message.error(`下载过程中出现问题：${hint}`);

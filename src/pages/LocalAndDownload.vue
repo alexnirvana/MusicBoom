@@ -1,15 +1,37 @@
 <script setup lang="ts">
 import { stat } from "@tauri-apps/plugin-fs";
-import { h, onMounted, ref } from "vue";
+import { computed, h, onMounted, ref } from "vue";
 import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
-import { useDownloadStore } from "../stores/download";
+import { useDownloadStore, type DownloadTab } from "../stores/download";
 
-const { state, refreshLocalSongs, refreshDownloads, addLocalSongFromPath, cancelDownload } =
+const { state, refreshLocalSongs, refreshDownloads, addLocalSongFromPath, cancelDownload, consumePreferredTab } =
   useDownloadStore();
 const message = useMessage();
-const activeTab = ref("local");
+const activeTab = ref<DownloadTab>("local");
 const addingLocal = ref(false);
+
+// 标签配置，用于实现更现代的视觉展示
+const tabItems = computed(() => [
+  {
+    key: "local" as DownloadTab,
+    label: "本地歌曲",
+    description: "已导入的离线曲库",
+    count: state.localSongs.length,
+  },
+  {
+    key: "downloaded" as DownloadTab,
+    label: "下载完成",
+    description: "可离线播放的歌曲",
+    count: state.downloads.filter((item) => item.status === "success").length,
+  },
+  {
+    key: "downloading" as DownloadTab,
+    label: "正在下载",
+    description: "当前排队与下载中",
+    count: state.downloads.filter((item) => item.status === "pending" || item.status === "downloading").length,
+  },
+]);
 
 function formatSize(bytes?: number) {
   if (!bytes || Number.isNaN(bytes)) return "未知";
@@ -21,6 +43,7 @@ function formatSize(bytes?: number) {
 onMounted(() => {
   refreshLocalSongs();
   refreshDownloads();
+  activeTab.value = consumePreferredTab("local");
 });
 
 async function handleAddLocal() {
@@ -93,8 +116,29 @@ const successColumns = [
         </n-button>
       </div>
 
-      <n-tabs type="segment" v-model:value="activeTab">
-        <n-tab-pane name="local" tab="本地歌曲">
+      <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+        <div class="grid gap-3 sm:grid-cols-3">
+          <button
+            v-for="item in tabItems"
+            :key="item.key"
+            class="tab-card"
+            :class="{ 'is-active': activeTab === item.key }"
+            @click="activeTab = item.key"
+          >
+            <div class="flex items-center gap-3">
+              <div class="rounded-full bg-white/10 px-3 py-1 text-sm text-white">{{ item.label }}</div>
+              <span class="rounded-full bg-emerald-500/15 px-2 text-xs font-semibold text-emerald-300">
+                {{ item.count }}
+              </span>
+            </div>
+            <p class="m-0 mt-2 text-left text-xs text-[#c8d5ef]">{{ item.description }}</p>
+            <div class="active-indicator" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div v-if="activeTab === 'local'">
           <n-data-table
             :columns="baseColumns"
             :data="state.localSongs"
@@ -102,9 +146,9 @@ const successColumns = [
             :pagination="false"
             :row-key="(row: any) => row.id"
           />
-        </n-tab-pane>
+        </div>
 
-        <n-tab-pane name="downloaded" tab="下载歌曲">
+        <div v-else-if="activeTab === 'downloaded'">
           <n-data-table
             :columns="successColumns"
             :data="state.downloads.filter((item) => item.status === 'success')"
@@ -112,9 +156,9 @@ const successColumns = [
             :pagination="false"
             :row-key="(row: any) => row.songId"
           />
-        </n-tab-pane>
+        </div>
 
-        <n-tab-pane name="downloading" tab="正在下载">
+        <div v-else>
           <n-data-table
             :columns="activeDownloadingColumns"
             :data="state.downloads.filter((item) => item.status === 'pending' || item.status === 'downloading')"
@@ -122,8 +166,26 @@ const successColumns = [
             :pagination="false"
             :row-key="(row: any) => row.songId"
           />
-        </n-tab-pane>
-      </n-tabs>
+        </div>
+      </div>
     </div>
   </MainLayout>
 </template>
+
+<style scoped>
+.tab-card {
+  @apply relative w-full rounded-xl border border-white/5 bg-gradient-to-b from-white/5 to-white/0 px-4 py-3 text-left transition-all duration-200 hover:border-emerald-300/40 hover:bg-white/10;
+}
+
+.tab-card .active-indicator {
+  @apply absolute inset-x-4 bottom-1 h-1 rounded-full bg-white/10;
+}
+
+.tab-card.is-active {
+  @apply border-emerald-400/60 bg-emerald-500/10 shadow-[0_8px_30px_rgba(16,185,129,0.25)];
+}
+
+.tab-card.is-active .active-indicator {
+  @apply bg-gradient-to-r from-emerald-400 via-emerald-300 to-emerald-400;
+}
+</style>
