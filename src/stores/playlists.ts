@@ -121,5 +121,6 @@ export function usePlaylistsStore() {
     removePlaylist,
     selectPlaylist,
     addSongsToPlaylist,
+    loadSongsForPlaylist,
   };
 }

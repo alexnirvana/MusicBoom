@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Heart, HeartOutline, Play, PlaySkipForward } from "@vicons/ionicons5";
+import { AddOutline, Heart, HeartOutline, Play, PlaySkipForward } from "@vicons/ionicons5";
 import {
   NButton,
   NDataTable,
@@ -10,9 +10,12 @@ import {
   type DataTableColumns,
   type DropdownDividerOption,
   type DropdownOption,
+  type DropdownGroupOption,
+  useMessage,
 } from "naive-ui";
 import { computed, h, nextTick, ref, type Component, type PropType } from "vue";
 import type { NavidromeSong } from "../types/navidrome";
+import { usePlaylistsStore } from "../stores/playlists";
 
 // 定义组件入参，方便在不同页面复用同一套表格渲染与筛选逻辑
 const props = defineProps({
@@ -33,6 +36,10 @@ const emit = defineEmits<{
 // 记录双击选中的行，便于高亮当前歌曲
 const activeRowId = ref<string | null>(null);
 const tableWrapperRef = ref<HTMLElement | null>(null);
+
+// 获取歌单列表和消息提示
+const playlists = usePlaylistsStore();
+const message = useMessage();
 
 // 右键菜单的可见性与定位，结合当前行数据动态渲染
 const showContextMenu = ref(false);
@@ -132,8 +139,25 @@ function rowClassName(row: NavidromeSong) {
 }
 
 // 右键菜单选项，收藏状态动态切换爱心样式
-const dropdownOptions = computed<(DropdownOption | DropdownDividerOption)[]>(() => {
+const dropdownOptions = computed<(DropdownOption | DropdownDividerOption | DropdownGroupOption)[]>(() => {
   const isFav = contextRow.value ? props.favoriteIds.has(contextRow.value.id) : false;
+
+  // 构建歌单子菜单选项
+  const playlistChildren = playlists.state.items.map((p) => ({
+    label: p.name,
+    key: `playlist:${p.id}`,
+  } as DropdownOption));
+
+  // 如果没有歌单，添加一个提示
+  if (playlistChildren.length === 0) {
+    playlistChildren.push({
+      label: "暂无歌单",
+      key: "no-playlist",
+      disabled: true,
+
+    } as DropdownOption);
+  }
+
   return [
     {
       label: "播放",
@@ -145,11 +169,17 @@ const dropdownOptions = computed<(DropdownOption | DropdownDividerOption)[]>(() 
       key: "play-next",
       icon: renderIcon(PlaySkipForward),
     },
-    { type: "divider", key: "divider" },
+    { type: "divider", key: "divider-1" },
     {
       label: "我喜欢",
       key: "favorite",
       icon: renderIcon(isFav ? Heart : HeartOutline, isFav ? "#ef4444" : "#9ab4d8"),
+    },
+    {
+      label: "添加到",
+      key: "add-to",
+      icon: renderIcon(AddOutline),
+      children: playlistChildren,
     },
   ];
 });
@@ -173,6 +203,23 @@ function handleMenuSelect(key: string | number) {
 
   if (key === "favorite") {
     emit("toggle-favorite", target);
+    return;
+  }
+
+  // 处理添加到歌单
+  if (typeof key === "string" && key.startsWith("playlist:")) {
+    const playlistId = key.replace("playlist:", "");
+    const playlist = playlists.state.items.find((p) => p.id === playlistId);
+    if (!playlist) {
+      message.error("歌单不存在");
+      return;
+    }
+    playlists.addSongsToPlaylist(playlistId, [target])
+      .then(() => message.success(`已添加到歌单：${playlist.name}`))
+      .catch((error) => {
+        const hint = error instanceof Error ? error.message : String(error);
+        message.error(`添加到歌单失败：${hint}`);
+      });
   }
 }
 
@@ -245,6 +292,7 @@ defineExpose({ locateRow });
         :y="contextMenuY"
         :show="showContextMenu"
         :options="dropdownOptions"
+        :scrollable="true"
         @select="handleMenuSelect"
         @clickoutside="handleMenuClickoutside"
       />
@@ -252,13 +300,3 @@ defineExpose({ locateRow });
   </div>
 </template>
 
-<style scoped>
-:deep(.active-row td) {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-}
-
-/* 鼠标悬停时的样式微调，保持高亮行的区分度 */
-:deep(.n-data-table-tr:hover td) {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-}
-</style>
