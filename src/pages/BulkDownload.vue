@@ -51,12 +51,8 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-async function downloadOne(song: NavidromeSong) {
-  const targetPath = await resolveSongTargetPath(song, settingsState.download, {
-    ensureDir: true,
-    occupied: reservedPaths,
-  });
-
+async function downloadOne(song: NavidromeSong, targetPath: string) {
+  // 直接使用预先计算好的目标路径，避免重复计算导致编号再次递增
   await downloadStore.trackDownload(song, async (signal, plannedPath, updateProgress) => {
     await settingsReady;
     const context = buildNavidromeContext(authState, settingsState);
@@ -126,7 +122,7 @@ async function downloadOne(song: NavidromeSong) {
 }
 
 async function filterDownloadTargets(list: NavidromeSong[]) {
-  const pending: NavidromeSong[] = [];
+  const pending: { song: NavidromeSong; targetPath: string }[] = [];
   const skipped: string[] = [];
 
   console.log("[批量下载] 准备过滤下载目标，总数：", list.length);
@@ -153,8 +149,13 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
         }
       }
 
-      pending.push(song);
-      console.log("[批量下载] 加入下载队列：", song.title || song.id);
+      const targetPath = await resolveSongTargetPath(song, settingsState.download, {
+        occupied: reservedPaths,
+        ensureDir: true,
+      });
+
+      pending.push({ song, targetPath });
+      console.log("[批量下载] 加入下载队列：", song.title || song.id, "目标路径：", targetPath);
     } catch (error) {
       console.warn("计算文件路径失败，跳过该歌曲", error);
     }
@@ -190,7 +191,7 @@ async function handleDownloadSelected() {
       return;
     }
     // 启动全部下载任务后立即跳转，确保能立刻看到进度
-    const tasks = targets.map((song) => downloadOne(song));
+    const tasks = targets.map(({ song, targetPath }) => downloadOne(song, targetPath));
     downloadStore.setPreferredTab("downloading");
     router.push({ name: "local-download" });
     await Promise.allSettled(tasks);
