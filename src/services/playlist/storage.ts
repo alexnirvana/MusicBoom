@@ -45,23 +45,12 @@ export async function renamePlaylist(id: string, name: string) {
 export async function removePlaylist(id: string) {
   const db = await getPlaylistDb();
   try {
-    // 使用事务确保删除操作的原子性
-    await db.execute('BEGIN TRANSACTION');
+    // 启用外键约束和级联删除
+    await db.execute(`PRAGMA foreign_keys = ON;`);
     
-    // 先删除歌单中的所有歌曲
-    await db.execute(`DELETE FROM playlist_songs WHERE playlist_id = ?`, [Number(id)]);
-    
-    // 再删除歌单本身
-    const result = await db.execute(`DELETE FROM playlists WHERE id = ?`, [Number(id)]);
-    
-    // 检查是否真的删除了记录
-    if (result.rowsAffected === 0) {
-      throw new Error('歌单不存在或已被删除');
-    }
-    
-    await db.execute('COMMIT');
+    // 删除歌单，由于设置了 ON DELETE CASCADE，关联的歌曲会自动删除
+    await db.execute(`DELETE FROM playlists WHERE id = ?`, [Number(id)]);
   } catch (error) {
-    await db.execute('ROLLBACK').catch(() => {}); // 回滚失败不影响主错误
     console.error('删除歌单失败:', error);
     throw new Error('删除歌单失败，请重试');
   }
