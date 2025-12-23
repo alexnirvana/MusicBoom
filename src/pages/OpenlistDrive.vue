@@ -52,6 +52,7 @@ const lastSessionSignature = ref<string | null>(null);
 const selectionMode = ref(false);
 const selectedPaths = ref<Set<string>>(new Set());
 const viewMode = ref<"detail" | "thumb">("detail");
+const uploaderVisible = ref(false);
 
 const driveAddress = computed(() => state.baseUrl || "尚未填写地址");
 const selectedCount = computed(() => selectedPaths.value.size);
@@ -205,6 +206,21 @@ const handleUploadFinished = () => {
   fetchDirectory(activeDir.value);
 };
 
+// 打开上传弹窗，需先校验登录状态
+const openUploaderDialog = () => {
+  if (!state.token || !state.baseUrl) {
+    message.warning("请先登录 OpenList 网盘");
+    router.push({ name: "openlist-login" });
+    return;
+  }
+  uploaderVisible.value = true;
+};
+
+// 关闭上传弹窗
+const closeUploaderDialog = () => {
+  uploaderVisible.value = false;
+};
+
 // 开关批量选择
 const toggleSelectionMode = () => {
   selectionMode.value = !selectionMode.value;
@@ -336,13 +352,6 @@ onActivated(async () => {
         </div>
       </div>
 
-      <OpenlistUploader
-        :base-url="state.baseUrl || ''"
-        :token="state.token || ''"
-        :active-dir="activeDir"
-        @uploaded="handleUploadFinished"
-      />
-
       <div class="grid gap-4 lg:grid-cols-[280px_1fr]">
         <div class="rounded-2xl border border-white/10 bg-[#0f1320]/70 px-4 py-3">
           <div class="mb-2 flex items-center justify-between text-white">
@@ -371,15 +380,18 @@ onActivated(async () => {
               <p class="m-0 text-sm text-[#9ab4d8]">当前目录</p>
               <h2 class="m-0 text-xl font-semibold">{{ activeDir }}</h2>
             </div>
-            <n-button
-              v-if="!isLoggedIn"
-              tertiary
-              type="primary"
-              @click="router.push({ name: 'openlist-login' })"
-            >
-              登录
-            </n-button>
-            <n-button v-else tertiary type="error" @click="handleLogout">退出登录</n-button>
+            <div class="flex items-center gap-2">
+              <n-button tertiary type="primary" @click="openUploaderDialog">上传</n-button>
+              <n-button
+                v-if="!isLoggedIn"
+                tertiary
+                type="primary"
+                @click="router.push({ name: 'openlist-login' })"
+              >
+                登录
+              </n-button>
+              <n-button v-else tertiary type="error" @click="handleLogout">退出登录</n-button>
+            </div>
           </div>
 
           <div class="rounded-xl border border-white/5">
@@ -461,5 +473,22 @@ onActivated(async () => {
         </div>
       </div>
     </div>
+
+    <n-modal
+      v-model:show="uploaderVisible"
+      preset="card"
+      title="上传文件"
+      :style="{ maxWidth: '780px' }"
+      content-style="padding: 0"
+      :on-after-leave="closeUploaderDialog"
+      @close="closeUploaderDialog"
+    >
+      <OpenlistUploader
+        :base-url="state.baseUrl || ''"
+        :token="state.token || ''"
+        :active-dir="activeDir"
+        @uploaded="handleUploadFinished"
+      />
+    </n-modal>
   </MainLayout>
 </template>
