@@ -79,6 +79,29 @@ async function handlePlay(payload: { row: NavidromeSong; list: NavidromeSong[] }
   }
 }
 
+// 播放全部：替换当前播放列表并从第一首开始播放
+async function handlePlayAll() {
+  if (songs.value.length === 0) {
+    message.warning("暂无可播放的歌曲，请先同步。");
+    return;
+  }
+
+  try {
+    await settingsReady;
+    const context = resolveNavidromeContext();
+    await player.playFromList(songs.value, songs.value[0].id, context);
+    message.success("已替换播放列表并开始播放第一首歌曲");
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`播放全部失败：${hint}`);
+  }
+}
+
+// 跳转到批量下载页面
+function goDownloadPage() {
+  router.push({ name: "batch-download" });
+}
+
 // 右键菜单：插入为下一首播放
 async function handlePlayNext(payload: { row: NavidromeSong; list: NavidromeSong[] }) {
   try {
@@ -162,12 +185,13 @@ onBeforeUnmount(() => {
   <MainLayout>
     <div class="space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
-        <div>
-          <p class="m-0 text-sm uppercase tracking-[0.08em] text-[#8bb8ff]">我的音乐</p>
-          <h1 class="m-0 text-3xl font-semibold text-white">来自 Navidrome 的全部歌曲</h1>
-          <p class="m-0 text-[#c6d2e8]">打开页面后自动同步 Navidrome 中的曲库，便于统一搜索与管理。</p>
+        <div class="flex flex-col gap-1">
+          <h1 class="m-0 text-2xl font-semibold text-white">全部歌曲</h1>
+          <p class="m-0 text-[#c6d2e8]">快速播放、批量下载，保持曲库与播放队列同步。</p>
         </div>
         <div class="flex flex-wrap gap-3">
+          <n-button tertiary type="primary" color="#22c55e" @click="handlePlayAll">播放全部</n-button>
+          <n-button secondary type="primary" color="#0ea5e9" @click="goDownloadPage">批量下载</n-button>
           <n-button type="primary" color="#6366f1" :loading="loading" @click="loadSongs">立即同步</n-button>
         </div>
       </div>

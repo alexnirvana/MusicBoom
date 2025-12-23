@@ -4,6 +4,8 @@ import Home from "../pages/Home.vue";
 import Settings from "../pages/Settings.vue";
 import MyMusic from "../pages/MyMusic.vue";
 import FavoriteMusic from "../pages/FavoriteMusic.vue";
+import BulkDownload from "../pages/BulkDownload.vue";
+import LocalAndDownload from "../pages/LocalAndDownload.vue";
 import OpenlistDrive from "../pages/OpenlistDrive.vue";
 import OpenlistLogin from "../pages/OpenlistLogin.vue";
 import { useAuthStore } from "../stores/auth";
@@ -15,6 +17,18 @@ const routes = [
   { path: "/login", name: "login", component: Login },
   { path: "/home", name: "home", component: Home, meta: { requiresAuth: true } },
   { path: "/my-music", name: "my-music", component: MyMusic, meta: { requiresAuth: true } },
+  {
+    path: "/downloads/batch",
+    name: "batch-download",
+    component: BulkDownload,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/downloads",
+    name: "local-download",
+    component: LocalAndDownload,
+    meta: { requiresAuth: true },
+  },
   { path: "/favorites", name: "favorites", component: FavoriteMusic, meta: { requiresAuth: true } },
   { path: "/openlist/login", name: "openlist-login", component: OpenlistLogin },
   { path: "/openlist", name: "openlist-drive", component: OpenlistDrive },
