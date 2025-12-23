@@ -6,6 +6,8 @@ import {
   listDownloadRecords,
   listLocalSongs,
   removeDownloadRecord,
+  removeDownloadRecords,
+  removeLocalSongs,
   upsertDownloadRecord,
   upsertLocalSong,
 } from "../services/library";
@@ -86,6 +88,18 @@ async function clearDownload(songId: string) {
   state.downloads = state.downloads.filter((item) => item.songId !== songId);
 }
 
+async function clearDownloads(songIds: string[]) {
+  if (!songIds.length) return;
+  await removeDownloadRecords(songIds);
+  state.downloads = state.downloads.filter((item) => !songIds.includes(item.songId));
+}
+
+async function deleteLocalSongs(ids: string[]) {
+  if (!ids.length) return;
+  await removeLocalSongs(ids);
+  state.localSongs = state.localSongs.filter((item) => !ids.includes(item.id));
+}
+
 async function trackDownload(
   song: NavidromeSong,
   updater: (signal: AbortSignal) => Promise<{ filePath?: string | null }>
@@ -156,6 +170,8 @@ export function useDownloadStore() {
     trackDownload,
     cancelDownload,
     clearDownload,
+    clearDownloads,
+    deleteLocalSongs,
   };
 }
 

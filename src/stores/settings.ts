@@ -28,7 +28,7 @@ const defaultState: SettingsState = {
     musicDir: "",
     organizeByAlbum: true,
     downloadLyrics: true,
-    overwriteExisting: true,
+    overwriteExisting: false,
     sourcePreference: "latest",
     cacheDir: "",
     speedLimitMode: "auto",

@@ -119,3 +119,17 @@ export async function removeDownloadRecord(songId: string) {
   await db.execute(`DELETE FROM downloads WHERE song_id = ?`, [songId]);
 }
 
+export async function removeDownloadRecords(songIds: string[]) {
+  if (!songIds.length) return;
+  const db = await getDb();
+  const placeholders = songIds.map(() => "?").join(", ");
+  await db.execute(`DELETE FROM downloads WHERE song_id IN (${placeholders})`, songIds);
+}
+
+export async function removeLocalSongs(ids: string[]) {
+  if (!ids.length) return;
+  const db = await getDb();
+  const placeholders = ids.map(() => "?").join(", ");
+  await db.execute(`DELETE FROM local_music WHERE id IN (${placeholders})`, ids);
+}
+
