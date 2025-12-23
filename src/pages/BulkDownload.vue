@@ -121,10 +121,18 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
   const pending: NavidromeSong[] = [];
   const skipped: string[] = [];
 
+  console.log("[批量下载] 准备过滤下载目标，总数：", list.length);
+
   for (const song of list) {
     try {
       const targetPath = await resolveTargetPath(song);
       if (!settingsState.download.overwriteExisting && (await exists(targetPath))) {
+        console.log(
+          "[批量下载] 跳过已有文件（关闭覆盖）：",
+          song.title || song.id,
+          "目标路径：",
+          targetPath
+        );
         skipped.push(song.title || song.id);
         continue;
       }
@@ -135,6 +143,12 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
       if (!settingsState.download.overwriteExisting && finished?.filePath) {
         try {
           if (await exists(finished.filePath)) {
+            console.log(
+              "[批量下载] 跳过已完成的历史任务：",
+              song.title || song.id,
+              "历史文件：",
+              finished.filePath
+            );
             skipped.push(song.title || song.id);
             continue;
           }
@@ -144,6 +158,12 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
       }
 
       pending.push(song);
+      console.log(
+        "[批量下载] 加入下载队列：",
+        song.title || song.id,
+        "目标路径：",
+        targetPath
+      );
     } catch (error) {
       console.warn("计算文件路径失败，跳过该歌曲", error);
     }
@@ -155,6 +175,13 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
     message.info(`已跳过已存在的歌曲：${display}${moreHint}`);
   }
 
+  console.log(
+    "[批量下载] 过滤完成，待下载：",
+    pending.length,
+    "首，跳过：",
+    skipped.length,
+    "首"
+  );
   return pending;
 }
 
