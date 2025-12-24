@@ -389,6 +389,27 @@ watch(
               }}
             </p>
             <div class="flex items-center gap-2">
+              <!-- 播放源指示器 -->
+              <span 
+                v-if="player.currentTrack.value"
+                class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full"
+                :class="{
+                  'bg-green-500/20 text-green-400 border border-green-500/30': player.state.playSource === 'local',
+                  'bg-blue-500/20 text-blue-400 border border-blue-500/30': player.state.playSource === 'downloaded',
+                  'bg-purple-500/20 text-purple-400 border border-purple-500/30': player.state.playSource === 'cached',
+                  'bg-orange-500/20 text-orange-400 border border-orange-500/30': player.state.playSource === 'online'
+                }"
+              >
+                <span v-if="player.state.playSource === 'local'" class="w-1.5 h-1.5 bg-green-400 rounded-full"></span>
+                <span v-if="player.state.playSource === 'downloaded'" class="w-1.5 h-1.5 bg-blue-400 rounded-full"></span>
+                <span v-if="player.state.playSource === 'cached'" class="w-1.5 h-1.5 bg-purple-400 rounded-full"></span>
+                <span v-if="player.state.playSource === 'online'" class="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
+                {{
+                  player.state.playSource === 'local' ? '本地' :
+                  player.state.playSource === 'downloaded' ? '已下载' :
+                  player.state.playSource === 'cached' ? '缓存' : '在线'
+                }}
+              </span>
               <n-button
                 quaternary
                 circle

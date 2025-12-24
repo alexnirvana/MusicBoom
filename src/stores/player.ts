@@ -5,9 +5,11 @@ import type { NavidromeSong } from "../api/navidrome";
 import { buildStreamUrl, getSongById } from "../api/navidrome";
 import { readSetting, writeSetting } from "../services/settings-table";
 import { SETTING_KEYS } from "../constants/setting-keys";
+import { listDownloadRecords, listLocalSongs } from "../services/library";
 import type {
   PlayAuthContext,
   PlayMode,
+  PlaySource,
   PlaybackSnapshot,
   PlayerState,
 } from "../types/player";
@@ -27,6 +29,7 @@ const state = reactive<PlayerState>({
   volume: 1,
   error: null,
   authContext: null,
+  playSource: "online",
 });
 
 audio.volume = state.volume;
@@ -145,8 +148,31 @@ async function persistSnapshot() {
   await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, snapshot);
 }
 
-// 计算可播放的音频地址，若配置了缓存目录则先尝试落盘
-async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthContext) {
+
+
+// 计算可播放的音频地址，优先使用本地文件，返回播放源类型
+async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthContext): Promise<{ url: string; source: PlaySource }> {
+  // 1. 首先检查本地音乐库
+  const localSongs = await listLocalSongs();
+  const localSong = localSongs.find(song => song.id === track.id);
+  if (localSong && await exists(localSong.path)) {
+    const localBuffer = await readFile(localSong.path);
+    console.log(`使用本地音乐播放: ${track.title}`);
+    state.playSource = "local";
+    return { url: URL.createObjectURL(new Blob([localBuffer], { type: AUDIO_MIME })), source: "local" };
+  }
+
+  // 2. 检查下载记录中是否有成功下载的文件
+  const downloadRecords = await listDownloadRecords("success");
+  const downloadRecord = downloadRecords.find(record => record.songId === track.id);
+  if (downloadRecord?.filePath && await exists(downloadRecord.filePath)) {
+    const downloadBuffer = await readFile(downloadRecord.filePath);
+    console.log(`使用下载文件播放: ${track.title}`);
+    state.playSource = "downloaded";
+    return { url: URL.createObjectURL(new Blob([downloadBuffer], { type: AUDIO_MIME })), source: "downloaded" };
+  }
+
+  // 3. 检查缓存目录
   const downloadSettings = await readSetting<DownloadSettings>(SETTING_KEYS.DOWNLOAD);
   const cacheDir = downloadSettings?.cacheDir?.trim();
   let cachePath: string | null = null;
@@ -158,7 +184,9 @@ async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthCont
 
       if (await exists(cachePath)) {
         const cachedBuffer = await readFile(cachePath);
-        return URL.createObjectURL(new Blob([cachedBuffer], { type: AUDIO_MIME }));
+        console.log(`使用缓存文件播放: ${track.title}`);
+        state.playSource = "cached";
+        return { url: URL.createObjectURL(new Blob([cachedBuffer], { type: AUDIO_MIME })), source: "cached" };
       }
     } catch (error) {
       console.warn("创建或检查缓存目录失败，将直接播放流", error);
@@ -166,8 +194,12 @@ async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthCont
     }
   }
 
+  // 4. 回退到在线流播放
   const streamUrl = buildStreamUrl({ ...context, songId: track.id });
-  if (!cachePath) return streamUrl;
+  console.log(`使用在线流播放: ${track.title}`);
+  state.playSource = "online";
+  
+  if (!cachePath) return { url: streamUrl, source: "online" };
 
   try {
     const response = await fetch(streamUrl);
@@ -176,10 +208,10 @@ async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthCont
     }
     const buffer = await response.arrayBuffer();
     await writeFile(cachePath, new Uint8Array(buffer));
-    return URL.createObjectURL(new Blob([buffer], { type: AUDIO_MIME }));
+    return { url: URL.createObjectURL(new Blob([buffer], { type: AUDIO_MIME })), source: "cached" };
   } catch (error) {
     console.warn("写入缓存失败，将回退为在线播放", error);
-    return streamUrl;
+    return { url: streamUrl, source: "online" };
   }
 }
 
@@ -201,12 +233,12 @@ async function playCurrent() {
   state.loading = true;
   state.error = null;
   try {
-    const source = await resolvePlayableSource(track, context);
+    const { url } = await resolvePlayableSource(track, context);
     // 如果在加载过程中用户已经切换到其他歌曲，则直接放弃当前请求
     if (sessionId !== playSessionId) return;
 
-    if (audio.src !== source) {
-      audio.src = source;
+    if (audio.src !== url) {
+      audio.src = url;
     }
     await audio.play();
     state.isPlaying = true;
@@ -314,8 +346,8 @@ async function restoreFromSnapshot(context: PlayAuthContext) {
     state.progress = 0;
     state.duration = 0;
 
-    const source = await resolvePlayableSource(track, context);
-    audio.src = source;
+    const { url } = await resolvePlayableSource(track, context);
+    audio.src = url;
     syncProgress();
 
     // 回写去除进度信息的快照，确保数据库不再保存播放时间
