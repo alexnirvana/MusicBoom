@@ -525,7 +525,7 @@ async function openCacheDirectory() {
             <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-3">
               <n-form-item label="下载目录">
                 <div class="flex items-center gap-3">
-                  <n-input v-model:value="downloadForm.musicDir" placeholder="选择音乐下载目录" clearable />
+                  <n-input v-model:value="downloadForm.musicDir" placeholder="选择音乐下载目录" clearable style="flex: 1" />
                   <n-button @click="selectDownloadDirectory" title="选择目录">
                     <template #icon>
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -569,7 +569,7 @@ async function openCacheDirectory() {
             <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-3">
               <n-form-item label="缓存路径">
                 <div class="flex items-center gap-3">
-                  <n-input v-model:value="downloadForm.cacheDir" placeholder="用于下载缓存" clearable />
+                  <n-input v-model:value="downloadForm.cacheDir" placeholder="用于下载缓存" clearable style="flex: 1" />
                   <n-button @click="selectCacheDirectory" title="选择目录">
                     <template #icon>
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">

@@ -191,6 +191,13 @@
     "core:webview:allow-create-webview-window",
     "core:window:allow-get-all-windows",
     "dialog:default",
-    "opener:allow-open-path"
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    }
   ]
 }
