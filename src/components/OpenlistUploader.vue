@@ -4,6 +4,7 @@ import { useMessage } from "naive-ui";
 import { uploadOpenlistFile } from "../api/openlist";
 import { useSettingsStore } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
+import { insertUploadRecord } from "../services/upload-records/db";
 
 interface TagProcessResult {
   success: boolean;
@@ -206,6 +207,22 @@ const processQueue = async () => {
       task.progress = 100;
       task.speed = 0;
       task.status = "success";
+      
+      // 插入数据库记录
+      try {
+        const filePath = `${task.targetDir}/${task.name}`;
+        await insertUploadRecord(
+          filePath,
+          task.anchorId || null,
+          task.size,
+          task.name
+        );
+        console.log(`[Database] 成功插入上传记录: ${filePath}`);
+      } catch (dbError) {
+        console.error("插入数据库记录失败:", dbError);
+        // 不影响上传成功状态，只记录错误
+      }
+      
       emit("uploaded");
     } catch (error) {
       console.error(`[Upload] Failed to upload ${task.name}:`, error);
