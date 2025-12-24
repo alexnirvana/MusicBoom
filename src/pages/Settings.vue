@@ -2,6 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { appCacheDir, appDataDir, downloadDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir, readDir, stat } from "@tauri-apps/plugin-fs";
+import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useAuthStore } from "../stores/auth";
@@ -318,6 +320,68 @@ async function handleSavePlayback() {
     savingPlayback.value = false;
   }
 }
+
+// 选择下载目录
+async function selectDownloadDirectory() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择下载目录"
+    });
+    if (selected && !Array.isArray(selected)) {
+      downloadForm.musicDir = selected;
+    }
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`选择目录失败：${fallback}`);
+  }
+}
+
+// 选择缓存目录
+async function selectCacheDirectory() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择缓存目录"
+    });
+    if (selected && !Array.isArray(selected)) {
+      downloadForm.cacheDir = selected;
+    }
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`选择目录失败：${fallback}`);
+  }
+}
+
+// 打开下载目录
+async function openDownloadDirectory() {
+  try {
+    if (downloadForm.musicDir) {
+      await openPath(downloadForm.musicDir);
+    } else {
+      message.warning("请先设置下载目录");
+    }
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`打开目录失败：${fallback}`);
+  }
+}
+
+// 打开缓存目录
+async function openCacheDirectory() {
+  try {
+    if (downloadForm.cacheDir) {
+      await openPath(downloadForm.cacheDir);
+    } else {
+      message.warning("请先设置缓存目录");
+    }
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`打开目录失败：${fallback}`);
+  }
+}
 </script>
 
 <template>
@@ -462,6 +526,13 @@ async function handleSavePlayback() {
               <n-form-item label="下载目录">
                 <div class="flex items-center gap-3">
                   <n-input v-model:value="downloadForm.musicDir" placeholder="选择音乐下载目录" clearable />
+                  <n-button @click="selectDownloadDirectory" title="选择目录">
+                    <template #icon>
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                    </template>
+                  </n-button>
                   <n-tag type="info" size="small">{{ musicDirSize }}</n-tag>
                 </div>
               </n-form-item>
@@ -473,7 +544,7 @@ async function handleSavePlayback() {
                 >
                   设为默认路径
                 </n-button>
-                <n-button tertiary class="w-full">打开文件夹</n-button>
+                <n-button tertiary class="w-full" @click="openDownloadDirectory">打开文件夹</n-button>
               </div>
               <div class="space-y-2">
                 <p class="m-0 text-sm text-[#9ab4d8]">下载模式</p>
@@ -499,6 +570,13 @@ async function handleSavePlayback() {
               <n-form-item label="缓存路径">
                 <div class="flex items-center gap-3">
                   <n-input v-model:value="downloadForm.cacheDir" placeholder="用于下载缓存" clearable />
+                  <n-button @click="selectCacheDirectory" title="选择目录">
+                    <template #icon>
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                    </template>
+                  </n-button>
                   <n-tag type="info" size="small">{{ cacheDirSize }}</n-tag>
                 </div>
               </n-form-item>
@@ -510,7 +588,7 @@ async function handleSavePlayback() {
                 >
                   设为默认缓存
                 </n-button>
-                <n-button tertiary class="w-full">打开缓存文件夹</n-button>
+                <n-button tertiary class="w-full" @click="openCacheDirectory">打开缓存文件夹</n-button>
               </div>
               <div class="space-y-2">
                 <p class="m-0 text-sm text-[#9ab4d8]">下载限速</p>

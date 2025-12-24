@@ -2,81 +2,168 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "auth"],
+  "windows": [
+    "main",
+    "auth"
+  ],
   "permissions": [
     "core:path:default",
     "opener:default",
-        "fs:default",
+    "fs:default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
         {
-          "identifier": "fs:scope",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [
         {
-          "identifier": "fs:allow-stat",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
         {
-          "identifier": "fs:allow-mkdir",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
         {
-          "identifier": "fs:allow-exists",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
         {
-          "identifier": "fs:allow-write-file",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
         {
-          "identifier": "fs:allow-remove",
-          "allow": [
-            { "path": "**" },
-            { "path": "$APPCACHE/**" },
-            { "path": "$APPDATA/**" },
-            { "path": "$APPLOCALDATA/**" },
-            { "path": "$DOWNLOAD/**" },
-            { "path": "$DOCUMENT/**" },
-        { "path": "$HOME/**" }
+          "path": "**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPLOCALDATA/**"
+        },
+        {
+          "path": "$DOWNLOAD/**"
+        },
+        {
+          "path": "$DOCUMENT/**"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
     "http:default",
@@ -91,7 +178,7 @@
     "core:window:allow-start-dragging",
     "core:event:allow-listen",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-is-maximized", 
+    "core:window:allow-is-maximized",
     "core:window:allow-close",
     "core:window:allow-set-decorations",
     "core:window:allow-set-resizable",
@@ -102,7 +189,8 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:webview:allow-create-webview-window",
-    "core:window:allow-get-all-windows"
-
+    "core:window:allow-get-all-windows",
+    "dialog:default",
+    "opener:allow-open-path"
   ]
 }
