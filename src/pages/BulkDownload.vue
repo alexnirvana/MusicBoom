@@ -11,6 +11,7 @@ import { useDownloadStore } from "../stores/download";
 import { useRouter } from "../utils/router-lite";
 import { buildNavidromeContext } from "../utils/navidrome-context";
 import { resolveSongTargetPath } from "../utils/download-path";
+import { filterUndownloadedSongs } from "../utils/download-status";
 
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
@@ -20,6 +21,7 @@ const message = useMessage();
 
 const loading = ref(false);
 const downloading = ref(false);
+const allSongs = ref<NavidromeSong[]>([]);
 const songs = ref<NavidromeSong[]>([]);
 const checkedRowKeys = ref<string[]>([]);
 
@@ -28,14 +30,30 @@ const reservedPaths = new Set<string>();
 const selectedSongs = computed(() =>
   songs.value.filter((item) => checkedRowKeys.value.includes(item.id))
 );
+const songCountInfo = computed(() => {
+  if (allSongs.value.length === songs.value.length) {
+    return `共 ${songs.value.length} 首`;
+  }
+  const downloadedCount = allSongs.value.length - songs.value.length;
+  return `共 ${allSongs.value.length} 首 (已下载 ${downloadedCount} 首, 未下载 ${songs.value.length} 首)`;
+});
 
 async function loadSongs() {
   loading.value = true;
   try {
     await settingsReady;
     const context = buildNavidromeContext(authState, settingsState);
-    songs.value = await getSongs(context);
+    allSongs.value = await getSongs(context);
+    
+    // 过滤出未下载的歌曲
+    songs.value = await filterUndownloadedSongs(allSongs.value);
     checkedRowKeys.value = songs.value.map((item) => item.id);
+    
+    // 显示过滤结果提示
+    if (allSongs.value.length > songs.value.length) {
+      const downloadedCount = allSongs.value.length - songs.value.length;
+      message.info(`已过滤掉 ${downloadedCount} 首已下载的歌曲，当前显示 ${songs.value.length} 首未下载歌曲`);
+    }
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     message.error(`拉取歌曲失败：${hint}`);
@@ -126,6 +144,7 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
   const skipped: string[] = [];
 
   console.log("[批量下载] 准备过滤下载目标，总数：", list.length);
+  console.log("[批量下载] 当前列表歌曲：", list.map(s => `${s.title} (${s.id})`));
 
   for (const song of list) {
     try {
@@ -279,10 +298,10 @@ const columns = [
       <n-card :bordered="true" class="bg-white/5 border-white/10">
         <template #header>
           <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <h3 class="m-0 text-lg font-semibold text-white">选择要下载的歌曲</h3>
-              <span class="text-sm text-[#9ab4d8]">共 {{ songs.length }} 首</span>
-            </div>
+          <div class="flex items-center gap-2">
+            <h3 class="m-0 text-lg font-semibold text-white">选择要下载的歌曲</h3>
+            <span class="text-sm text-[#9ab4d8]">{{ songCountInfo }}</span>
+          </div>
             <n-button quaternary type="primary" color="#6366f1" :loading="loading" @click="loadSongs">
               重新同步
             </n-button>

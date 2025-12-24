@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { AddOutline, Heart, HeartOutline, Play, PlaySkipForward } from "@vicons/ionicons5";
+import { AddOutline, DownloadOutline, Heart, HeartOutline, Play, PlaySkipForward } from "@vicons/ionicons5";
 import {
   NButton,
   NDataTable,
   NDropdown,
   NIcon,
   NInput,
+  NTag,
   NSpin,
   type DataTableColumns,
   type DropdownDividerOption,
@@ -16,6 +17,7 @@ import {
 import { computed, h, nextTick, ref, type Component, type PropType } from "vue";
 import type { NavidromeSong } from "../types/navidrome";
 import { usePlaylistsStore } from "../stores/playlists";
+import type { DownloadStatus } from "../utils/download-status";
 
 // 定义组件入参，方便在不同页面复用同一套表格渲染与筛选逻辑
 const props = defineProps({
@@ -23,6 +25,7 @@ const props = defineProps({
   songs: { type: Array as PropType<NavidromeSong[]>, default: () => [] },
   loading: { type: Boolean, default: false },
   favoriteIds: { type: Object as PropType<Set<string>>, default: () => new Set<string>() },
+  downloadStatuses: { type: Object as PropType<Map<string, DownloadStatus>>, default: () => new Map() },
   emptyHint: { type: String, default: "暂无歌曲数据，尝试同步或检查连接。" },
   searchPlaceholder: { type: String, default: "搜索标题、歌手或专辑" },
 });
@@ -112,6 +115,26 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
   { title: "歌手", key: "artist", minWidth: 140, ellipsis: true },
   { title: "专辑", key: "album", minWidth: 160, ellipsis: true },
   { title: "时长", key: "duration", width: 100, render: (row) => formatDuration(row.duration) },
+  {
+    title: "下载状态",
+    key: "download",
+    width: 120,
+    render: (row) => {
+      const status = props.downloadStatuses.get(row.id);
+      if (status?.isDownloaded) {
+        return h(
+          NTag,
+          { type: "success", size: "small" },
+          { default: () => "已下载" }
+        );
+      }
+      return h(
+        NTag,
+        { type: "default", size: "small" },
+        { default: () => "未下载" }
+      );
+    },
+  },
 ]);
 
 // 双击行后发出播放事件，外部可以结合播放器上下文处理

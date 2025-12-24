@@ -10,11 +10,13 @@ import { usePlayerStore } from "../stores/player";
 import { addFavorite, listFavorites, removeFavorite } from "../services/favorite";
 import { useRouter } from "../utils/router-lite";
 import { listenLocateRequest } from "../utils/playlist-locator";
+import { checkSongsDownloadStatus } from "../utils/download-status";
 
 // 状态管理：加载态、歌曲列表、收藏集
 const loading = ref(false);
 const songs = ref<NavidromeSong[]>([]);
 const favoriteIds = ref<Set<string>>(new Set());
+const downloadStatuses = ref(new Map<string, any>());
 const message = useMessage();
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
@@ -63,6 +65,16 @@ async function loadFavorites() {
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     message.error(`读取收藏状态失败：${hint}`);
+  }
+}
+
+// 读取下载状态，保持表格中的下载标记同步
+async function loadDownloadStatuses() {
+  try {
+    downloadStatuses.value = await checkSongsDownloadStatus(songs.value);
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    console.error(`读取下载状态失败：${hint}`);
   }
 }
 
@@ -176,6 +188,17 @@ onMounted(() => {
   loadSongs();
 });
 
+// 监听歌曲列表变化，自动更新下载状态
+watch(
+  () => songs.value,
+  async () => {
+    if (songs.value.length > 0) {
+      await loadDownloadStatuses();
+    }
+  },
+  { immediate: true }
+);
+
 onBeforeUnmount(() => {
   stopLocate();
 });
@@ -201,6 +224,7 @@ onBeforeUnmount(() => {
         :songs="songs"
         :loading="loading"
         :favorite-ids="favoriteIds"
+        :download-statuses="downloadStatuses"
         empty-hint="暂无歌曲数据，尝试同步或检查 Navidrome 连接。"
         ref="tableRef"
         @toggle-favorite="toggleFavorite"
