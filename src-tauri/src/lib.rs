@@ -32,7 +32,8 @@ pub fn run() {
             queue_resume,
             queue_cancel,
             cache_fetch,
-            cache_refresh
+            cache_refresh,
+            add_app_anchor_tag
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出现异常");

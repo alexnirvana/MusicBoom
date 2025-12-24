@@ -2,6 +2,7 @@ use crate::app_state::{AppState, QueueKind, QueueTask, ServerConfig};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
+use std::path::Path;
 
 /// 新增或更新服务器配置。
 #[tauri::command]
@@ -209,4 +210,112 @@ pub struct FileEntry {
 pub struct CacheStatus {
     pub cache_ready: bool,
     pub last_refresh: String,
+}
+
+/// 音频标签处理结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProcessResult {
+    pub success: bool,
+    pub error_message: Option<String>,
+    pub app_anchor_id: Option<String>,
+    pub modified_data: Option<Vec<u8>>,
+}
+
+/// 为音频文件添加APP_ANCHOR_ID标签
+#[tauri::command]
+pub async fn add_app_anchor_tag(
+    file_name: String,
+    file_data: Vec<u8>,
+    app_anchor_id: Option<String>,
+) -> Result<TagProcessResult, String> {
+    // 如果没有提供app_anchor_id，则生成一个新的
+    let anchor_id = app_anchor_id.unwrap_or_else(|| {
+        Uuid::new_v4().to_string()
+    });
+
+    // 从文件名检查扩展名
+    let path = Path::new(&file_name);
+    let extension = path.extension().and_then(|ext| ext.to_str());
+    
+    match extension {
+        Some("flac") | Some("mp3") | Some("m4a") | Some("ogg") => {
+            // 处理支持的音频格式
+            match add_tag_to_file(&file_data, &anchor_id, extension.unwrap()) {
+                Ok(modified_data) => Ok(TagProcessResult {
+                    success: true,
+                    error_message: None,
+                    app_anchor_id: Some(anchor_id),
+                    modified_data: Some(modified_data),
+                }),
+                Err(e) => Ok(TagProcessResult {
+                    success: false,
+                    error_message: Some(format!("{}文件标签写入失败: {}", extension.unwrap(), e)),
+                    app_anchor_id: Some(anchor_id),
+                    modified_data: None,
+                }),
+            }
+        }
+        Some("wav") | Some("aac") => {
+            Ok(TagProcessResult {
+                success: false,
+                error_message: Some(format!("{}格式暂不支持标签写入，请转换为FLAC/MP3/M4A/OGG格式", extension.unwrap())),
+                app_anchor_id: Some(anchor_id),
+                modified_data: None,
+            })
+        }
+        _ => Ok(TagProcessResult {
+            success: false,
+            error_message: Some("不支持的音频格式，目前支持FLAC、MP3、M4A、OGG".to_string()),
+            app_anchor_id: Some(anchor_id),
+            modified_data: None,
+        }),
+    }
+}
+
+/// 为音频文件添加标签的通用函数
+fn add_tag_to_file(file_data: &[u8], anchor_id: &str, format: &str) -> Result<Vec<u8>, String> {
+    use audiotags::Tag;
+    
+    // 创建临时文件
+    let temp_file = format!("temp_{}.{}", Uuid::new_v4(), format);
+    let temp_path = std::env::temp_dir().join(&temp_file);
+    let temp_path_str = temp_path.to_string_lossy();
+    
+    // 写入原始数据
+    if let Err(e) = std::fs::write(&temp_path, file_data) {
+        return Err(format!("写入临时文件失败: {}", e));
+    }
+    
+    // 读取并修改标签
+    let mut tag = match Tag::new().read_from_path(temp_path_str.as_ref()) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("读取音频标签失败: {}", e));
+        }
+    };
+    
+    // 设置评论字段为APP_ANCHOR_ID
+    let comment_with_anchor = format!("APP_ANCHOR_ID:{}", anchor_id);
+    tag.set_comment(comment_with_anchor);
+    
+    // 写回标签
+    if let Err(e) = tag.write_to_path(&temp_path_str) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("写入音频标签失败: {}", e));
+    }
+    
+    // 读取修改后的数据
+    let modified_data = match std::fs::read(&temp_path) {
+        Ok(data) => data,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("读取修改后的文件失败: {}", e));
+        }
+    };
+    
+    // 清理临时文件
+    let _ = std::fs::remove_file(&temp_path);
+    
+    Ok(modified_data)
 }

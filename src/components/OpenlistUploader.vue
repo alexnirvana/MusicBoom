@@ -2,6 +2,15 @@
 import { computed, ref } from "vue";
 import { useMessage } from "naive-ui";
 import { uploadOpenlistFile } from "../api/openlist";
+import { useSettingsStore } from "../stores/settings";
+import { invoke } from "@tauri-apps/api/core";
+
+interface TagProcessResult {
+  success: boolean;
+  error_message?: string;
+  app_anchor_id?: string;
+  modified_data?: number[];
+}
 
 interface UploadItem {
   id: string;
@@ -13,12 +22,14 @@ interface UploadItem {
   file: File;
   targetDir: string;
   message?: string;
+  anchorId?: string | null;
 }
 
 const props = defineProps<{ baseUrl?: string; token?: string; activeDir: string }>();
 const emit = defineEmits<{ (e: "uploaded"): void }>();
 
 const message = useMessage();
+const settingsStore = useSettingsStore();
 const uploaderHover = ref(false);
 const uploadQueue = ref<UploadItem[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -47,8 +58,66 @@ const formatSpeed = (bytesPerSecond: number) => {
   return `${(bytesPerSecond / 1024 / 1024).toFixed(1)} MB/s`;
 };
 
+// 检查文件是否为音频文件
+const isAudioFile = (file: File): boolean => {
+  const audioExtensions = [".flac", ".mp3", ".wav", ".ogg", ".m4a", ".aac"];
+  const fileName = file.name.toLowerCase();
+  return audioExtensions.some(ext => fileName.endsWith(ext));
+};
+
+// 为音频文件添加APP_ANCHOR_ID标签
+const addAppAnchorTag = async (file: File): Promise<{ file: File; anchorId: string | null }> => {
+  // 检查设置中的标签配置
+  const tagSettings = settingsStore.state.download.tags;
+  
+  // 如果没有启用任何标签类型，则跳过处理
+  if (!tagSettings.enableApev2 && !tagSettings.enableId3v1 && !tagSettings.enableId3v2) {
+    return { file, anchorId: null };
+  }
+
+  // 只对音频文件处理
+  if (!isAudioFile(file)) {
+    return { file, anchorId: null };
+  }
+
+  try {
+    // 将文件转换为字节数组
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    
+    // 调用Tauri命令添加标签
+    const result = await invoke("add_app_anchor_tag", {
+      fileName: file.name,
+      fileData: Array.from(uint8Array), // 将Uint8Array转换为普通数组以便序列化
+      appAnchorId: null, // 让Rust端自动生成ID
+    }) as TagProcessResult;
+
+    if (result.success && result.app_anchor_id && result.modified_data) {
+      // 使用Rust端返回的修改后的文件数据创建新的File对象
+      const modifiedUint8Array = new Uint8Array(result.modified_data);
+      const modifiedBlob = new Blob([modifiedUint8Array], { type: file.type });
+      const modifiedFile = new File([modifiedBlob], file.name, { 
+        type: file.type,
+        lastModified: Date.now()
+      });
+      
+      console.log(`[Tag] 成功为文件 ${file.name} 添加标签 APP_ANCHOR_ID:${result.app_anchor_id}`);
+      return { file: modifiedFile, anchorId: result.app_anchor_id };
+    } else {
+      if (result.error_message) {
+        message.warning(`处理音频标签时遇到问题: ${result.error_message}`);
+      }
+      return { file, anchorId: null };
+    }
+  } catch (error) {
+    console.error("添加APP_ANCHOR_ID标签时出错:", error);
+    message.warning("添加音频标签失败，将继续上传原始文件");
+    return { file, anchorId: null };
+  }
+};
+
 // 统一处理文件列表入口
-const handleFiles = (files: File[]) => {
+const handleFiles = async (files: File[]) => {
   if (!files.length) return;
 
   if (!props.baseUrl || !props.token) {
@@ -62,18 +131,25 @@ const handleFiles = (files: File[]) => {
     return;
   }
 
-  const tasks = files.map<UploadItem>((file) => ({
-    id: `${Date.now()}-${file.name}-${Math.random().toString(16).slice(2)}`,
-    name: file.name,
-    size: file.size,
-    progress: 0,
-    speed: 0,
-    status: "pending",
-    file,
-    targetDir: currentDir.value,
-  }));
+  // 处理每个文件，为音频文件添加标签
+  const processedFiles = await Promise.all(
+    files.map(async (file) => {
+      const { file: processedFile, anchorId } = await addAppAnchorTag(file);
+      return {
+        id: `${Date.now()}-${processedFile.name}-${Math.random().toString(16).slice(2)}`,
+        name: processedFile.name,
+        size: processedFile.size,
+        progress: 0,
+        speed: 0,
+        status: "pending" as const,
+        file: processedFile,
+        targetDir: currentDir.value,
+        anchorId,
+      };
+    })
+  );
 
-  uploadQueue.value = [...tasks, ...uploadQueue.value];
+  uploadQueue.value = [...processedFiles, ...uploadQueue.value];
   processQueue();
 };
 
