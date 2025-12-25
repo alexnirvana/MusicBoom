@@ -169,8 +169,8 @@ async function cancelDownload(songId: string) {
   if (target) {
     target.status = "cancelled";
     target.progress = 0;
-    // 立即同步数据库，避免刷新后又自动恢复
-    await persistDownload(target);
+    // 从数据库中彻底删除，避免刷新后又自动恢复
+    await removeDownloadRecord(songId);
     // 从当前列表中移除，给用户即时反馈
     state.downloads = state.downloads.filter((item) => item.songId !== songId);
   }

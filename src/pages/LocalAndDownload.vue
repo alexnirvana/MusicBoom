@@ -77,7 +77,6 @@ onMounted(() => {
         reservedDownloadPaths.add(item.filePath);
       }
     });
-    handleResumeDownloads();
   });
   activeTab.value = consumePreferredTab("local");
 });
@@ -90,7 +89,6 @@ onActivated(() => {
         reservedDownloadPaths.add(item.filePath);
       }
     });
-    handleResumeDownloads();
   });
   activeTab.value = consumePreferredTab(activeTab.value);
 });
@@ -198,6 +196,8 @@ async function handleCancelDownloading() {
   cancellingDownloading.value = true;
   try {
     await cancelDownloads(selectedDownloadingIds.value);
+    // 取消后从数据库中彻底删除这些记录，避免重新加载后又出现
+    await clearDownloads(selectedDownloadingIds.value);
     selectedDownloadingIds.value = [];
     await refreshDownloads();
     message.success("所选下载任务已取消");
@@ -443,10 +443,10 @@ const successColumns = [
             <span class="text-sm text-[#9ab4d8]">已选择 {{ selectedDownloadingIds.length }} 首正在下载的歌曲</span>
             <div class="flex items-center gap-2">
               <n-button quaternary type="warning" :loading="cancellingDownloading" @click="handleCancelDownloading">
-                取消选中
+                取消下载
               </n-button>
               <n-button quaternary type="primary" :loading="resuming" @click="handleResumeDownloads">
-                恢复未完成
+                恢复下载
               </n-button>
             </div>
           </div>
