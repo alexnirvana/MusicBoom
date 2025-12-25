@@ -410,13 +410,15 @@ onActivated(async () => {
             :options="[{ label: '全部根目录', value: '/' }, ...rootOptions]"
             placeholder="选择根目录以收起其他目录"
           />
-          <n-tree
-            block-line
-            :data="displayTree"
-            :selected-keys="[activeDir]"
-            v-model:expanded-keys="expandedKeys"
-            @update:selected-keys="handleDirectorySelect"
-          />
+          <div class="max-h-[500px] overflow-y-auto overflow-x-hidden pr-2">
+            <n-tree
+              block-line
+              :data="displayTree"
+              :selected-keys="[activeDir]"
+              v-model:expanded-keys="expandedKeys"
+              @update:selected-keys="handleDirectorySelect"
+            />
+          </div>
         </div>
 
         <div class="rounded-2xl border border-white/10 bg-[#0f1320]/70 px-4 py-3">
@@ -439,7 +441,7 @@ onActivated(async () => {
             </div>
           </div>
 
-          <div class="rounded-xl border border-white/5">
+          <div class="max-h-[500px] overflow-auto rounded-xl border border-white/5">
             <n-spin :show="loading">
               <template v-if="viewMode === 'detail'">
                 <div class="overflow-x-auto">
@@ -559,7 +561,7 @@ onActivated(async () => {
       v-model:show="uploaderVisible"
       preset="card"
       title="上传文件"
-      :style="{ maxWidth: '780px',maxHeight: '60vh' }"
+      :style="{ maxWidth: '780px' }"
       content-style="padding: 0"
       :on-after-leave="closeUploaderDialog"
       @close="closeUploaderDialog"

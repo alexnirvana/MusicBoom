@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useMessage } from "naive-ui";
+import { NButton, NScrollbar, NSpin, NTag, useMessage } from "naive-ui";
 import { uploadOpenlistFile } from "../api/openlist";
 import { useSettingsStore } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import { insertUploadRecord } from "../services/upload-records/db";
 
 interface TagProcessResult {
@@ -24,6 +25,7 @@ interface UploadItem {
   targetDir: string;
   message?: string;
   anchorId?: string | null;
+  originalFile?: File; // 保存原始文件引用，用于标签处理
 }
 
 const props = defineProps<{ baseUrl?: string; token?: string; activeDir: string }>();
@@ -35,8 +37,15 @@ const uploaderHover = ref(false);
 const uploadQueue = ref<UploadItem[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
+const processingCount = ref(0);
+const totalProcessingCount = ref(0);
 
 const currentDir = computed(() => props.activeDir || "/");
+
+// 计算当前正在上传和等待中的任务数量
+const pendingCount = computed(() => uploadQueue.value.filter((item) => item.status === "pending").length);
+const uploadingCount = computed(() => uploadQueue.value.filter((item) => item.status === "uploading").length);
+const totalCount = computed(() => pendingCount.value + uploadingCount.value);
 
 // 触发原生文件选择框
 const triggerFileInput = () => {
@@ -132,26 +141,56 @@ const handleFiles = async (files: File[]) => {
     return;
   }
 
-  // 处理每个文件，为音频文件添加标签
-  const processedFiles = await Promise.all(
-    files.map(async (file) => {
-      const { file: processedFile, anchorId } = await addAppAnchorTag(file);
-      return {
-        id: `${Date.now()}-${processedFile.name}-${Math.random().toString(16).slice(2)}`,
-        name: processedFile.name,
-        size: processedFile.size,
-        progress: 0,
-        speed: 0,
-        status: "pending" as const,
-        file: processedFile,
-        targetDir: currentDir.value,
-        anchorId,
-      };
-    })
-  );
+  // 先立即显示所有文件，状态为 pending
+  processingCount.value = 0;
+  totalProcessingCount.value = files.length;
 
-  uploadQueue.value = [...processedFiles, ...uploadQueue.value];
-  processQueue();
+  // 生成文件 ID 和任务的映射
+  const fileTasks = files.map((file) => ({
+    id: `${Date.now()}-${file.name}-${Math.random().toString(16).slice(2)}`,
+    name: file.name,
+    size: file.size,
+    progress: 0,
+    speed: 0,
+    status: "pending" as const,
+    file,
+    targetDir: currentDir.value,
+    anchorId: null as string | null,
+    originalFile: file,
+  }));
+
+  // 新文件添加到队列末尾
+  uploadQueue.value = [...fileTasks, ...uploadQueue.value];
+
+  // 逐个处理文件添加标签
+  for (let i = 0; i < fileTasks.length; i++) {
+    const fileTask = fileTasks[i];
+
+    processingCount.value = i + 1;
+
+    try {
+      const { file: processedFile, anchorId } = await addAppAnchorTag(fileTask.originalFile);
+      // 通过 ID 找到任务并更新
+      const task = uploadQueue.value.find((t) => t.id === fileTask.id);
+      if (task) {
+        task.file = processedFile;
+        task.anchorId = anchorId;
+        task.size = processedFile.size;
+      }
+    } catch (error) {
+      console.error(`[Tag] 处理文件 ${fileTask.name} 标签失败:`, error);
+      // 标签处理失败，继续使用原文件，anchorId 保持为 null
+    }
+  }
+
+  processingCount.value = 0;
+  totalProcessingCount.value = 0;
+
+  // 如果当前没有任务在处理，启动队列处理
+  // 如果有任务在处理，新的 pending 任务会被自动处理（while 循环会继续检查）
+  if (!uploading.value) {
+    processQueue();
+  }
 };
 
 // 处理拖拽进入的视觉反馈
@@ -185,13 +224,17 @@ const processQueue = async () => {
 
   uploading.value = true;
 
+  // 记录初始的 pending 任务数量，用于判断是否全部完成
+  const initialPendingCount = uploadQueue.value.filter((item) => item.status === "pending").length;
+  let completedCount = 0;
+
   while (true) {
     const task = uploadQueue.value.find((item) => item.status === "pending");
     if (!task) break;
 
     task.status = "uploading";
     console.log(`[Upload] Starting upload for ${task.name} to ${task.targetDir}`);
-    
+
     try {
       await uploadOpenlistFile(
         props.baseUrl!,
@@ -207,7 +250,7 @@ const processQueue = async () => {
       task.progress = 100;
       task.speed = 0;
       task.status = "success";
-      
+
       // 插入数据库记录
       try {
         const filePath = `${task.targetDir}/${task.name}`;
@@ -222,7 +265,8 @@ const processQueue = async () => {
         console.error("插入数据库记录失败:", dbError);
         // 不影响上传成功状态，只记录错误
       }
-      
+
+      completedCount++;
       emit("uploaded");
     } catch (error) {
       console.error(`[Upload] Failed to upload ${task.name}:`, error);
@@ -236,15 +280,29 @@ const processQueue = async () => {
       }
       message.error(`文件 ${task.name} 上传失败：${task.message}`);
     }
+
+    // 每完成一个任务后检查是否还有 pending 任务
+    // 如果有新的 pending 任务（比如用户刚刚选择的），继续处理
+    // 否则结束队列处理
+    const hasPending = uploadQueue.value.some((item) => item.status === "pending");
+    if (!hasPending) break;
   }
 
   uploading.value = false;
+
+  // 如果所有初始的 pending 任务都完成了，发送通知
+  if (initialPendingCount > 0) {
+    sendNotification({
+      title: "上传完成",
+      body: `已成功上传 ${completedCount} 个文件`,
+    });
+  }
 };
 </script>
 
 <template>
   <div
-    class="rounded-2xl border border-white/10 bg-[#0f1320]/70 p-4 text-white"
+    class=" border border-white/10 bg-[#0f1320]/70 p-4 text-white"
     :class="uploaderHover ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-[#0f1320]' : ''"
     @dragover.prevent="handleDragOver"
     @dragleave.prevent="handleDragLeave"
@@ -257,13 +315,16 @@ const processQueue = async () => {
         <p class="m-0 text-xs text-[#9ab4d8]">可拖拽文件到此区域，或点击按钮选择文件</p>
       </div>
       <div class="flex items-center gap-2">
-        <n-button type="primary" :loading="uploading" @click="triggerFileInput">选择文件</n-button>
-        <n-tag type="info" round size="small">支持多文件拖拽</n-tag>
+        <n-button type="primary" @click="triggerFileInput">选择文件</n-button>
+        <n-tag v-if="totalCount > 0" type="info" round size="small">
+          上传中 {{ totalCount }} 项
+        </n-tag>
+        <n-tag v-else type="info" round size="small">支持多文件拖拽</n-tag>
       </div>
     </div>
 
     <div
-      class="mt-3 flex min-h-[140px] cursor-pointer items-center justify-center rounded-xl border border-dashed border-white/20 bg-white/5 px-4 text-center"
+      class="mt-3 flex min-h-[140px] cursor-pointer items-center justify-center  border border-dashed border-white/20 bg-white/5 px-4 text-center"
       :class="uploaderHover ? 'border-blue-400/70 bg-blue-400/10' : ''"
       @click="triggerFileInput"
     >
@@ -280,41 +341,57 @@ const processQueue = async () => {
       class="hidden"
       @change="handleFileChange"
     />
-<n-scrollbar style="max-height: 420px">
+
+    <!-- 显示正在处理标签的进度 -->
+    <div v-if="processingCount > 0" class="mt-4 rounded-xl border border-blue-400/30 bg-blue-500/10 px-4 py-3">
+      <div class="flex items-center gap-3">
+        <n-spin size="small" />
+        <div>
+          <p class="m-0 text-sm font-semibold text-blue-300">正在为音频文件添加标签...</p>
+          <p class="m-0 text-xs text-[#9ab4d8]">处理中 {{ processingCount }} / {{ totalProcessingCount }}</p>
+        </div>
+      </div>
+    </div>
+
     <div v-if="uploadQueue.length" class="mt-4 space-y-3">
       <div class="flex items-center justify-between text-sm text-[#9ab4d8]">
         <span>上传队列</span>
         <span>{{ uploadQueue.length }} 个任务</span>
       </div>
-      <div
-        v-for="task in uploadQueue"
-        :key="task.id"
-        class="rounded-xl border border-white/5 bg-white/5 p-3"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="m-0 text-base font-semibold text-white">{{ task.name }}</p>
-            <p class="m-0 text-xs text-[#9ab4d8]">{{ formatSize(task.size) }}</p>
-            <p class="m-0 text-xs text-[#9ab4d8]">目录：{{ task.targetDir }}</p>
-          </div>
-          <div class="text-right text-xs text-[#9ab4d8]">
-            <p class="m-0">进度：{{ task.progress }}%</p>
-            <p class="m-0">速度：{{ formatSpeed(task.speed) }}</p>
-          </div>
-        </div>
-        <div class="mt-2 h-2 rounded-full bg-white/10">
+      <n-scrollbar style="max-height: 400px">
+        <div class="space-y-3">
           <div
-            class="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all"
-            :class="task.status === 'error' ? 'from-red-500 to-pink-500' : ''"
-            :style="{ width: `${task.progress}%` }"
-          />
+            v-for="task in uploadQueue"
+            :key="task.id"
+            class="rounded-xl border border-white/5 bg-white/5 p-3"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="m-0 text-base font-semibold text-white">{{ task.name }}</p>
+                <p class="m-0 text-xs text-[#9ab4d8]">{{ formatSize(task.size) }}</p>
+                <p class="m-0 text-xs text-[#9ab4d8]">目录：{{ task.targetDir }}</p>
+              </div>
+              <div class="text-right text-xs text-[#9ab4d8]">
+                <p v-if="task.anchorId !== null" class="m-0 text-blue-300">已添加标签</p>
+                <p v-else class="m-0 text-[#9ab4d8]">未添加标签</p>
+                <p class="m-0">进度：{{ task.progress }}%</p>
+                <p class="m-0">速度：{{ formatSpeed(task.speed) }}</p>
+              </div>
+            </div>
+            <div class="mt-2 h-2 rounded-full bg-white/10">
+              <div
+                class="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all"
+                :class="task.status === 'error' ? 'from-red-500 to-pink-500' : ''"
+                :style="{ width: `${task.progress}%` }"
+              />
+            </div>
+            <p v-if="task.status === 'error' && task.message" class="mt-2 text-xs text-red-400">
+              {{ task.message }}
+            </p>
+            <p v-else-if="task.status === 'success'" class="mt-2 text-xs text-green-400">上传完成</p>
+          </div>
         </div>
-        <p v-if="task.status === 'error' && task.message" class="mt-2 text-xs text-red-400">
-          {{ task.message }}
-        </p>
-        <p v-else-if="task.status === 'success'" class="mt-2 text-xs text-green-400">上传完成</p>
-      </div>
+      </n-scrollbar>
     </div>
-    </n-scrollbar>
   </div>
 </template>

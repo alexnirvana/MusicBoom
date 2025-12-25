@@ -1,8 +1,8 @@
 use crate::app_state::{AppState, QueueKind, QueueTask, ServerConfig};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::State;
 use uuid::Uuid;
-use std::path::Path;
 
 /// 新增或更新服务器配置。
 #[tauri::command]
@@ -229,14 +229,12 @@ pub async fn add_app_anchor_tag(
     app_anchor_id: Option<String>,
 ) -> Result<TagProcessResult, String> {
     // 如果没有提供app_anchor_id，则生成一个新的
-    let anchor_id = app_anchor_id.unwrap_or_else(|| {
-        Uuid::new_v4().to_string()
-    });
+    let anchor_id = app_anchor_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // 从文件名检查扩展名
     let path = Path::new(&file_name);
     let extension = path.extension().and_then(|ext| ext.to_str());
-    
+
     match extension {
         Some("flac") | Some("mp3") | Some("m4a") | Some("ogg") => {
             // 处理支持的音频格式
@@ -255,14 +253,15 @@ pub async fn add_app_anchor_tag(
                 }),
             }
         }
-        Some("wav") | Some("aac") => {
-            Ok(TagProcessResult {
-                success: false,
-                error_message: Some(format!("{}格式暂不支持标签写入，请转换为FLAC/MP3/M4A/OGG格式", extension.unwrap())),
-                app_anchor_id: Some(anchor_id),
-                modified_data: None,
-            })
-        }
+        Some("wav") | Some("aac") => Ok(TagProcessResult {
+            success: false,
+            error_message: Some(format!(
+                "{}格式暂不支持标签写入，请转换为FLAC/MP3/M4A/OGG格式",
+                extension.unwrap()
+            )),
+            app_anchor_id: Some(anchor_id),
+            modified_data: None,
+        }),
         _ => Ok(TagProcessResult {
             success: false,
             error_message: Some("不支持的音频格式，目前支持FLAC、MP3、M4A、OGG".to_string()),
@@ -275,17 +274,17 @@ pub async fn add_app_anchor_tag(
 /// 为音频文件添加标签的通用函数
 fn add_tag_to_file(file_data: &[u8], anchor_id: &str, format: &str) -> Result<Vec<u8>, String> {
     use audiotags::Tag;
-    
+
     // 创建临时文件
     let temp_file = format!("temp_{}.{}", Uuid::new_v4(), format);
     let temp_path = std::env::temp_dir().join(&temp_file);
     let temp_path_str = temp_path.to_string_lossy();
-    
+
     // 写入原始数据
     if let Err(e) = std::fs::write(&temp_path, file_data) {
         return Err(format!("写入临时文件失败: {}", e));
     }
-    
+
     // 读取并修改标签
     let mut tag = match Tag::new().read_from_path(temp_path_str.as_ref()) {
         Ok(t) => t,
@@ -294,17 +293,17 @@ fn add_tag_to_file(file_data: &[u8], anchor_id: &str, format: &str) -> Result<Ve
             return Err(format!("读取音频标签失败: {}", e));
         }
     };
-    
+
     // 设置评论字段为APP_ANCHOR_ID
     let comment_with_anchor = format!("APP_ANCHOR_ID:{}", anchor_id);
     tag.set_comment(comment_with_anchor);
-    
+
     // 写回标签
     if let Err(e) = tag.write_to_path(&temp_path_str) {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("写入音频标签失败: {}", e));
     }
-    
+
     // 读取修改后的数据
     let modified_data = match std::fs::read(&temp_path) {
         Ok(data) => data,
@@ -313,9 +312,57 @@ fn add_tag_to_file(file_data: &[u8], anchor_id: &str, format: &str) -> Result<Ve
             return Err(format!("读取修改后的文件失败: {}", e));
         }
     };
-    
+
     // 清理临时文件
     let _ = std::fs::remove_file(&temp_path);
-    
+
     Ok(modified_data)
+}
+
+/// 清除指定目录下所有文件和文件夹
+#[tauri::command]
+pub async fn clear_directory(path: String) -> Result<String, String> {
+    let dir_path = Path::new(&path);
+
+    // 检查路径是否存在
+    if !dir_path.exists() {
+        return Ok("目录不存在，无需清理".to_string());
+    }
+
+    // 检查是否为目录
+    if !dir_path.is_dir() {
+        return Err("指定的路径不是目录".to_string());
+    }
+
+    // 递归删除目录下所有内容
+    match std::fs::remove_dir_all(dir_path) {
+        Ok(_) => {
+            // 删除后重新创建空目录
+            if let Err(e) = std::fs::create_dir_all(dir_path) {
+                return Err(format!("目录删除后重新创建失败: {}", e));
+            }
+            Ok(format!("已成功清除目录: {}", path))
+        }
+        Err(e) => Err(format!("清除目录失败: {}", e)),
+    }
+}
+
+/// 清除数据库中已下载歌曲的记录（local_music 和 downloads 表）
+#[tauri::command]
+pub async fn clear_downloaded_songs(db_path: String) -> Result<String, String> {
+    // 连接数据库
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite:{}", db_path))
+        .await
+        .map_err(|e| format!("连接数据库失败: {}", e))?;
+
+    // 清除 downloads 表
+    sqlx::query("DELETE FROM downloads")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("清除下载记录失败: {}", e))?;
+
+    // 关闭连接池
+    pool.close().await;
+
+    Ok("已成功清除已下载歌曲的数据库记录".to_string())
 }

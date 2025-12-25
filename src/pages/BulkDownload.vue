@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { computed, onActivated, onMounted, ref } from "vue";
-import { useMessage } from "naive-ui";
+import { computed, h, onActivated, onMounted, ref } from "vue";
+import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { getSongs, buildStreamUrl, type NavidromeSong } from "../api/navidrome";
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { useDownloadStore } from "../stores/download";
+import { usePlayerStore } from "../stores/player";
 import { useRouter } from "../utils/router-lite";
 import { buildNavidromeContext } from "../utils/navidrome-context";
 import { resolveSongTargetPath } from "../utils/download-path";
@@ -16,6 +17,7 @@ import { filterUndownloadedSongs } from "../utils/download-status";
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
 const downloadStore = useDownloadStore();
+const { currentTrack } = usePlayerStore();
 const router = useRouter();
 const message = useMessage();
 
@@ -37,6 +39,49 @@ const songCountInfo = computed(() => {
   const downloadedCount = allSongs.value.length - songs.value.length;
   return `共 ${allSongs.value.length} 首 (已下载 ${downloadedCount} 首, 未下载 ${songs.value.length} 首)`;
 });
+
+// 获取歌曲的下载状态
+function getDownloadStatus(songId: string) {
+  return downloadStore.state.downloads.find((item) => item.songId === songId);
+}
+
+// 暂停下载
+async function handlePause(songId: string) {
+  await downloadStore.pauseDownload(songId);
+  message.info("下载已暂停");
+}
+
+// 继续下载
+async function handleResume(songId: string) {
+  await downloadStore.resumeDownload(songId);
+  message.info("下载已继续");
+}
+
+// 下载当前播放的歌曲
+async function downloadCurrentSong() {
+  if (!currentTrack.value) {
+    message.warning("当前没有播放中的歌曲");
+    return;
+  }
+
+  downloading.value = true;
+  try {
+    const targets = await filterDownloadTargets([currentTrack.value]);
+    if (targets.length === 0) {
+      message.success("该歌曲已存在，无需重复下载");
+      return;
+    }
+
+    const { song, targetPath } = targets[0];
+    await downloadOne(song, targetPath);
+    message.success("当前歌曲下载成功");
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`下载失败：${hint}`);
+  } finally {
+    downloading.value = false;
+  }
+}
 
 async function loadSongs() {
   loading.value = true;
@@ -269,6 +314,69 @@ const columns = [
     width: 140,
     render: (row: NavidromeSong) => formatSize(row.size),
   },
+  {
+    title: "状态",
+    key: "status",
+    width: 120,
+    render: (row: NavidromeSong) => {
+      const download = getDownloadStatus(row.id);
+      if (!download) {
+        return h("span", { class: "text-[#9ab4d8]" }, "未下载");
+      }
+
+      switch (download.status) {
+        case "downloading":
+          return h("span", { class: "text-[#22c55e]" }, `下载中 (${download.progress}%)`);
+        case "pending":
+          return h("span", { class: "text-[#f59e0b]" }, "等待中");
+        case "success":
+          return h("span", { class: "text-[#6366f1]" }, "已完成");
+        case "failed":
+          return h("span", { class: "text-[#f43f5e]" }, "失败");
+        case "cancelled":
+          return h("span", { class: "text-[#9ab4d8]" }, "已取消");
+        default:
+          return h("span", { class: "text-[#9ab4d8]" }, download.status);
+      }
+    },
+  },
+  {
+    title: "操作",
+    key: "actions",
+    width: 120,
+    render: (row: NavidromeSong) => {
+      const download = getDownloadStatus(row.id);
+      if (!download) return null;
+
+      if (download.status === "downloading" || download.status === "pending") {
+        return h(
+          NButton,
+          {
+            tertiary: true,
+            type: "warning",
+            size: "small",
+            onClick: () => handlePause(row.id),
+          },
+          { default: () => "暂停" }
+        );
+      }
+
+      if (download.status === "failed" || download.status === "cancelled") {
+        return h(
+          NButton,
+          {
+            tertiary: true,
+            type: "primary",
+            size: "small",
+            onClick: () => handleResume(row.id),
+          },
+          { default: () => "重试" }
+        );
+      }
+
+      return null;
+    },
+  },
 ];
 </script>
 
@@ -285,6 +393,15 @@ const columns = [
             @click="handleDownloadSelected"
           >
             下载选中（{{ selectedSongs.length }}）
+          </n-button>
+          <n-button
+            v-if="currentTrack"
+            type="primary"
+            color="#6366f1"
+            :loading="downloading"
+            @click="downloadCurrentSong"
+          >
+            在听下载
           </n-button>
           <span class="text-sm text-[#c6d2e8]">下载到：{{ downloadDirLabel }}</span>
           <n-button quaternary type="primary" color="#0ea5e9" @click="goSettings">更改目录</n-button>

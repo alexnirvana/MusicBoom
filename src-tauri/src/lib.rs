@@ -8,6 +8,7 @@ use commands::*;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -33,7 +34,9 @@ pub fn run() {
             queue_cancel,
             cache_fetch,
             cache_refresh,
-            add_app_anchor_tag
+            add_app_anchor_tag,
+            clear_directory,
+            clear_downloaded_songs
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出现异常");

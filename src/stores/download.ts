@@ -17,6 +17,7 @@ export type DownloadTab = "local" | "downloaded" | "downloading";
 
 interface DownloadTask extends DownloadRecord {
   controller?: AbortController;
+  resumeFn?: () => Promise<void>;
 }
 
 interface DownloadState {
@@ -139,6 +140,37 @@ async function trackDownload(
   task.controller = controller;
   task.status = "downloading";
   task.progress = Math.max(task.progress || 0, 5);
+
+  // 保存恢复函数，便于后续继续下载
+  task.resumeFn = async () => {
+    const newController = new AbortController();
+    task.controller = newController;
+    task.status = "downloading";
+    await persistDownload(task);
+
+    try {
+      const result = await updater(newController.signal, task.filePath || targetPath, updateProgress);
+      if (newController.signal.aborted) {
+        task.status = "cancelled";
+        task.progress = 0;
+        await persistDownload(task);
+        return;
+      }
+
+      task.status = "success";
+      task.progress = 100;
+      task.filePath = result.filePath || task.filePath || targetPath;
+      task.resumeFn = undefined;
+      await persistDownload(task);
+    } catch (error) {
+      const hint = error instanceof Error ? error.message : String(error);
+      task.status = "failed";
+      task.progress = 0;
+      task.errorMessage = hint;
+      await persistDownload(task);
+    }
+  };
+
   await persistDownload(task);
 
   try {
@@ -153,6 +185,7 @@ async function trackDownload(
     task.status = "success";
     task.progress = 100;
     task.filePath = result.filePath || task.filePath || targetPath;
+    task.resumeFn = undefined;
     await persistDownload(task);
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
@@ -183,6 +216,35 @@ async function cancelDownloads(songIds: string[]) {
   }
 }
 
+async function pauseDownload(songId: string) {
+  const target = state.downloads.find((item) => item.songId === songId);
+  if (!target) return;
+
+  target?.controller?.abort();
+  if (target) {
+    target.status = "pending";
+    target.controller = undefined;
+    await persistDownload(target);
+  }
+}
+
+async function resumeDownload(songId: string) {
+  const target = state.downloads.find((item) => item.songId === songId);
+  if (!target || !target.resumeFn) return;
+
+  target.status = "downloading";
+  await persistDownload(target);
+
+  try {
+    await target.resumeFn();
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    target.status = "failed";
+    target.errorMessage = hint;
+    await persistDownload(target);
+  }
+}
+
 const downloadingList = computed(() =>
   state.downloads.filter((item) => item.status === "pending" || item.status === "downloading")
 );
@@ -201,6 +263,8 @@ export function useDownloadStore() {
     trackDownload,
     cancelDownload,
     cancelDownloads,
+    pauseDownload,
+    resumeDownload,
     clearDownload,
     clearDownloads,
     deleteLocalSongs,

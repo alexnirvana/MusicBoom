@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NConfigProvider, NGlobalStyle, NMessageProvider, NNotificationProvider } from "naive-ui";
+import { NConfigProvider, NDialogProvider, NGlobalStyle, NMessageProvider, NNotificationProvider } from "naive-ui";
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterView } from "./utils/router-lite";
 import { appTheme, appThemeOverrides } from "./theme";
@@ -25,9 +25,11 @@ onBeforeUnmount(() => {
 <template>
   <NConfigProvider :theme="appTheme" :theme-overrides="appThemeOverrides" class="h-full w-full">
     <NNotificationProvider placement="top-right">
-      <NMessageProvider>
-        <RouterView :key="viewRefreshKey" />
-      </NMessageProvider>
+      <NDialogProvider>
+        <NMessageProvider>
+          <RouterView :key="viewRefreshKey" />
+        </NMessageProvider>
+      </NDialogProvider>
     </NNotificationProvider>
     <NGlobalStyle />
   </NConfigProvider>

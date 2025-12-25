@@ -4,7 +4,8 @@ import { appCacheDir, appDataDir, downloadDir, join } from "@tauri-apps/api/path
 import { exists, mkdir, readDir, stat } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMessage } from "naive-ui";
+import { invoke } from "@tauri-apps/api/core";
+import { useMessage, useDialog } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useAuthStore } from "../stores/auth";
 import {
@@ -21,6 +22,7 @@ import type { Ref } from "vue";
 
 // 消息提示实例
 const message = useMessage();
+const dialog = useDialog();
 
 // 登录状态与服务器地址展示
 const { state: authState } = useAuthStore();
@@ -382,6 +384,65 @@ async function openCacheDirectory() {
     message.error(`打开目录失败：${fallback}`);
   }
 }
+
+// 清除下载目录
+async function clearDownloadDirectory() {
+  if (!downloadForm.musicDir) {
+    message.warning("请先设置下载目录");
+    return;
+  }
+
+  dialog.warning({
+    title: "确认清除",
+    content: "确定要清除下载目录下的所有文件和数据库记录吗？此操作不可撤销。",
+    positiveText: "确定",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        const result = await invoke<string>("clear_directory", { path: downloadForm.musicDir });
+        message.success(result);
+
+        // 同时清除数据库中的下载记录
+        const dbPath = await join(await appDataDir(), "musicboom.db");
+        await invoke<string>("clear_downloaded_songs", { dbPath });
+
+        // 刷新目录大小
+        await refreshDirectorySize(downloadForm.musicDir, musicDirSize, "下载目录");
+      } catch (error) {
+        const fallback = error instanceof Error ? error.message : String(error);
+        message.error(`清除下载目录失败：${fallback}`);
+      }
+    }
+  });
+}
+
+// 清除缓存目录
+async function clearCacheDirectory() {
+  if (!downloadForm.cacheDir) {
+    message.warning("请先设置缓存目录");
+    return;
+  }
+
+  dialog.warning({
+    title: "确认清除",
+    content: "确定要清除缓存目录下的所有文件吗？此操作不可撤销。",
+    positiveText: "确定",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        const result = await invoke<string>("clear_directory", { path: downloadForm.cacheDir });
+        message.success(result);
+
+        // 刷新目录大小
+        await refreshDirectorySize(downloadForm.cacheDir, cacheDirSize, "缓存目录");
+      } catch (error) {
+        const fallback = error instanceof Error ? error.message : String(error);
+        message.error(`清除缓存目录失败：${fallback}`);
+      }
+    }
+  });
+}
+
 </script>
 
 <template>
@@ -545,6 +606,7 @@ async function openCacheDirectory() {
                   设为默认路径
                 </n-button>
                 <n-button tertiary class="w-full" @click="openDownloadDirectory">打开文件夹</n-button>
+                <n-button tertiary class="w-full" type="error" @click="clearDownloadDirectory">清除目录</n-button>
               </div>
               <div class="space-y-2">
                 <p class="m-0 text-sm text-[#9ab4d8]">下载模式</p>
@@ -589,6 +651,7 @@ async function openCacheDirectory() {
                   设为默认缓存
                 </n-button>
                 <n-button tertiary class="w-full" @click="openCacheDirectory">打开缓存文件夹</n-button>
+                <n-button tertiary class="w-full" type="error" @click="clearCacheDirectory">清除缓存</n-button>
               </div>
               <div class="space-y-2">
                 <p class="m-0 text-sm text-[#9ab4d8]">下载限速</p>

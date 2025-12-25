@@ -354,6 +354,7 @@ defineExpose({ locateRow });
           :row-props="rowProps"
           :row-class-name="rowClassName"
           size="small"
+          max-height="500px"
           class="text-white song-table"
         />
       </n-spin>
