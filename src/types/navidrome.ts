@@ -7,6 +7,7 @@ export interface NavidromeSong {
   duration: number;
   coverUrl?: string;
   size?: number;
+  comment?: string;
 }
 
 export interface SubsonicSong {
@@ -17,6 +18,7 @@ export interface SubsonicSong {
   duration?: number;
   coverArt?: string;
   size?: number;
+  comment?: string;
 }
 
 export interface SubsonicArtist {

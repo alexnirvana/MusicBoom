@@ -106,6 +106,7 @@ async function fetchSongsByAlbum(
       duration: item.duration || 0,
       coverUrl: buildCoverUrl(baseUrl, auth, item.coverArt || album.coverArt),
       size: item.size,
+      comment: item.comment,
     }));
 }
 

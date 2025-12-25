@@ -11,12 +11,15 @@ import { addFavorite, listFavorites, removeFavorite } from "../services/favorite
 import { useRouter } from "../utils/router-lite";
 import { listenLocateRequest } from "../utils/playlist-locator";
 import { checkSongsDownloadStatus } from "../utils/download-status";
+import { getRecordByAnchorId } from "../services/upload-records/db";
+import { extractAppAnchorId, type AnchorStatus } from "../utils/anchor-status";
 
 // 状态管理：加载态、歌曲列表、收藏集
 const loading = ref(false);
 const songs = ref<NavidromeSong[]>([]);
 const favoriteIds = ref<Set<string>>(new Set());
 const downloadStatuses = ref(new Map<string, any>());
+const anchorStatuses = ref(new Map<string, AnchorStatus>());
 const message = useMessage();
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
@@ -76,6 +79,26 @@ async function loadDownloadStatuses() {
     const hint = error instanceof Error ? error.message : String(error);
     console.error(`读取下载状态失败：${hint}`);
   }
+}
+
+// 读取锚定状态，检查 comment 中的 APP_ANCHOR_ID 并查询 upload_records
+async function loadAnchorStatuses() {
+  const statuses = new Map<string, AnchorStatus>();
+  for (const song of songs.value) {
+    const anchorId = extractAppAnchorId(song.comment);
+    if (!anchorId) {
+      statuses.set(song.id, "no-id");
+      continue;
+    }
+    try {
+      const record = await getRecordByAnchorId(anchorId);
+      statuses.set(song.id, record ? "uploaded" : "no-upload");
+    } catch (error) {
+      console.error(`查询锚定记录失败：${song.id}`, error);
+      statuses.set(song.id, "no-upload");
+    }
+  }
+  anchorStatuses.value = statuses;
 }
 
 // 双击播放：将组件内过滤后的列表作为播放队列，保持顺序一致
@@ -188,12 +211,13 @@ onMounted(() => {
   loadSongs();
 });
 
-// 监听歌曲列表变化，自动更新下载状态
+// 监听歌曲列表变化，自动更新下载状态和锚定状态
 watch(
   () => songs.value,
   async () => {
     if (songs.value.length > 0) {
       await loadDownloadStatuses();
+      await loadAnchorStatuses();
     }
   },
   { immediate: true }
@@ -225,6 +249,7 @@ onBeforeUnmount(() => {
         :loading="loading"
         :favorite-ids="favoriteIds"
         :download-statuses="downloadStatuses"
+        :anchor-statuses="anchorStatuses"
         empty-hint="暂无歌曲数据，尝试同步或检查 Navidrome 连接。"
         ref="tableRef"
         @toggle-favorite="toggleFavorite"

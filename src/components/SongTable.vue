@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AddOutline, DownloadOutline, Heart, HeartOutline, Play, PlaySkipForward } from "@vicons/ionicons5";
+import { AddOutline, Heart, HeartOutline, InformationCircle, Play, PlaySkipForward } from "@vicons/ionicons5";
 import {
   NButton,
   NDataTable,
@@ -8,6 +8,7 @@ import {
   NInput,
   NTag,
   NSpin,
+  NTooltip,
   type DataTableColumns,
   type DropdownDividerOption,
   type DropdownOption,
@@ -18,6 +19,7 @@ import { computed, h, nextTick, ref, type Component, type PropType } from "vue";
 import type { NavidromeSong } from "../types/navidrome";
 import { usePlaylistsStore } from "../stores/playlists";
 import type { DownloadStatus } from "../utils/download-status";
+import type { AnchorStatus } from "../utils/anchor-status";
 
 // 定义组件入参，方便在不同页面复用同一套表格渲染与筛选逻辑
 const props = defineProps({
@@ -26,6 +28,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   favoriteIds: { type: Object as PropType<Set<string>>, default: () => new Set<string>() },
   downloadStatuses: { type: Object as PropType<Map<string, DownloadStatus>>, default: () => new Map() },
+  anchorStatuses: { type: Object as PropType<Map<string, AnchorStatus>>, default: () => new Map() },
   emptyHint: { type: String, default: "暂无歌曲数据，尝试同步或检查连接。" },
   searchPlaceholder: { type: String, default: "搜索标题、歌手或专辑" },
 });
@@ -132,6 +135,33 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
         NTag,
         { type: "default", size: "small" },
         { default: () => "未下载" }
+      );
+    },
+  },
+  {
+    title: "锚定状态",
+    key: "anchor",
+    width: 130,
+    render: (row) => {
+      const status = props.anchorStatuses.get(row.id);
+      if (status === "uploaded") {
+        return h(
+          NTag,
+          { type: "success", size: "small" },
+          { default: () => "已锚定" }
+        );
+      }
+      if (status === "no-upload") {
+        return h(
+          NTag,
+          { type: "warning", size: "small" },
+          { default: () => "无上传锚定" }
+        );
+      }
+      return h(
+        NTag,
+        { type: "default", size: "small" },
+        { default: () => "无ID锚定" }
       );
     },
   },
@@ -276,6 +306,25 @@ defineExpose({ locateRow });
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="m-0 text-lg font-semibold text-white">{{ title }}</h3>
             <p class="m-0 text-sm text-[#9ab4d8]">共 {{ songs.length }} 首</p>
+            <n-tooltip v-if="anchorStatuses.size > 0">
+              <template #trigger>
+                <n-icon :component="InformationCircle" class="text-[#9ab4d8] cursor-help" size="18" />
+              </template>
+              <div class="space-y-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-green-400">●</span>
+                  <span>已锚定：comment 中有 APP_ANCHOR_ID 且已在上传记录中找到</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-orange-400">●</span>
+                  <span>无上传锚定：comment 中有 APP_ANCHOR_ID 但未在上传记录中找到</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-gray-400">●</span>
+                  <span>无ID锚定：comment 中没有 APP_ANCHOR_ID</span>
+                </div>
+              </div>
+            </n-tooltip>
           </div>
           <div class="flex flex-wrap items-center gap-3">
             <slot name="actions" />
