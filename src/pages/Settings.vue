@@ -583,109 +583,119 @@ async function clearCacheDirectory() {
         </div>
         <n-form label-placement="top" :show-feedback="false" class="space-y-3">
           <div class="grid gap-4 md:grid-cols-2">
-            <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-3">
-              <n-form-item label="下载目录">
-                <div class="flex items-center gap-3">
-                  <n-input v-model:value="downloadForm.musicDir" placeholder="选择音乐下载目录" clearable style="flex: 1" />
-                  <n-button @click="selectDownloadDirectory" title="选择目录">
+            <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-4">
+              <div>
+                <label class="m-0 block text-sm font-medium text-[#9ab4d8]">下载目录 <n-tag type="info" size="medium">{{ musicDirSize }}</n-tag></label>
+                <div class="mt-2 flex items-center gap-2">
+                  <n-input
+                    v-model:value="downloadForm.musicDir"
+                    placeholder="选择音乐下载目录"
+                    clearable
+                    :disabled="true"
+                    class="flex-1"
+                  />
+                  <n-button @click="selectDownloadDirectory" size="small" quaternary>
                     <template #icon>
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                       </svg>
                     </template>
                   </n-button>
-                  <n-tag type="info" size="small">{{ musicDirSize }}</n-tag>
                 </div>
-              </n-form-item>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <n-button
-                  tertiary
-                  class="w-full"
-                  @click="downloadForm.musicDir = defaultMusicDir || ''"
-                >
-                  设为默认路径
+              </div>
+              <div class="grid gap-2 grid-cols-3">
+                <n-button size="small" tertiary @click="downloadForm.musicDir = defaultMusicDir || ''">
+                  默认路径
                 </n-button>
-                <n-button tertiary class="w-full" @click="openDownloadDirectory">打开文件夹</n-button>
-                <n-button tertiary class="w-full" type="error" @click="clearDownloadDirectory">清除目录</n-button>
+                <n-button size="small" tertiary @click="openDownloadDirectory">打开</n-button>
+                <n-button size="small" tertiary type="error" @click="clearDownloadDirectory">清除</n-button>
               </div>
-              <div class="space-y-2">
-                <p class="m-0 text-sm text-[#9ab4d8]">下载模式</p>
-                <n-radio-group v-model:value="downloadForm.organizeByAlbum">
-                  <div class="grid gap-2 sm:grid-cols-2">
+              <div class="space-y-3 rounded-lg bg-[#0f1320]/50 p-3">
+                <div>
+                  <p class="m-0 text-sm font-medium text-[#9ab4d8]">下载模式</p>
+                  <n-radio-group v-model:value="downloadForm.organizeByAlbum" class="mt-2 flex gap-4">
                     <n-radio :value="false">不分文件夹</n-radio>
-                    <n-radio :value="true">按来源专辑归档</n-radio>
-                  </div>
-                </n-radio-group>
-                <n-checkbox v-model:checked="downloadForm.downloadLyrics">同时下载歌词</n-checkbox>
-                <n-checkbox v-model:checked="downloadForm.overwriteExisting">同名文件覆盖</n-checkbox>
+                    <n-radio :value="true">按专辑归档</n-radio>
+                  </n-radio-group>
+                </div>
+                <div class="space-y-2">
+                  <n-checkbox v-model:checked="downloadForm.downloadLyrics">同时下载歌词</n-checkbox>
+                  <n-checkbox v-model:checked="downloadForm.overwriteExisting">同名文件覆盖</n-checkbox>
+                </div>
               </div>
-              <div class="space-y-1">
-                <p class="m-0 text-sm text-[#9ab4d8]">来源偏好</p>
-                <n-radio-group v-model:value="downloadForm.sourcePreference" class="flex flex-wrap gap-3">
+              <div class="rounded-lg bg-[#0f1320]/50 p-3">
+                <p class="m-0 text-sm font-medium text-[#9ab4d8]">来源偏好</p>
+                <n-radio-group v-model:value="downloadForm.sourcePreference" class="mt-2 flex gap-4">
                   <n-radio value="latest">最新歌曲</n-radio>
                   <n-radio value="hifi">高音质优先</n-radio>
                 </n-radio-group>
               </div>
             </div>
 
-            <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-3">
-              <n-form-item label="缓存路径">
-                <div class="flex items-center gap-3">
-                  <n-input v-model:value="downloadForm.cacheDir" placeholder="用于下载缓存" clearable style="flex: 1" />
-                  <n-button @click="selectCacheDirectory" title="选择目录">
+            <div class="rounded-xl border border-white/10 bg-[#11172a]/70 p-4 space-y-4">
+              <div>
+                <label class="m-0 block text-sm font-medium text-[#9ab4d8]">缓存路径                <n-tag type="info" size="medium">{{ cacheDirSize }}</n-tag></label>
+                <div class="mt-2 flex items-center gap-2">
+                  <n-input
+                    v-model:value="downloadForm.cacheDir"
+                    placeholder="用于下载缓存"
+                    :disabled="true"
+                    clearable
+                    class="flex-1"
+                  />
+                  <n-button @click="selectCacheDirectory" size="small" quaternary>
                     <template #icon>
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                       </svg>
                     </template>
                   </n-button>
-                  <n-tag type="info" size="small">{{ cacheDirSize }}</n-tag>
                 </div>
-              </n-form-item>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <n-button
-                  tertiary
-                  class="w-full"
-                  @click="downloadForm.cacheDir = defaultCacheDir || ''"
-                >
-                  设为默认缓存
+              </div>
+              <div class="grid gap-2 grid-cols-3">
+                <n-button size="small" tertiary @click="downloadForm.cacheDir = defaultCacheDir || ''">
+                  默认缓存
                 </n-button>
-                <n-button tertiary class="w-full" @click="openCacheDirectory">打开缓存文件夹</n-button>
-                <n-button tertiary class="w-full" type="error" @click="clearCacheDirectory">清除缓存</n-button>
+                <n-button size="small" tertiary @click="openCacheDirectory">打开</n-button>
+                <n-button size="small" tertiary type="error" @click="clearCacheDirectory">清除</n-button>
               </div>
-              <div class="space-y-2">
-                <p class="m-0 text-sm text-[#9ab4d8]">下载限速</p>
-                <n-radio-group v-model:value="downloadForm.speedLimitMode" class="flex flex-wrap gap-3">
-                  <n-radio value="auto">自动</n-radio>
-                  <n-radio value="manual">手动</n-radio>
-                </n-radio-group>
-                <div v-if="downloadForm.speedLimitMode === 'manual'" class="flex items-center gap-3">
-                  <n-slider v-model:value="downloadForm.speedLimit" :step="256" :min="512" :max="8192" style="flex: 1" />
-                  <n-tag type="info">{{ downloadForm.speedLimit }} MB</n-tag>
-                </div>
-              </div>
-              <div class="space-y-2">
-                <p class="m-0 text-sm text-[#9ab4d8]">MP3 标签编码</p>
-                <div class="flex flex-wrap gap-3">
-                  <n-checkbox v-model:checked="downloadForm.tags.enableApev2">APEv2</n-checkbox>
-                  <n-checkbox v-model:checked="downloadForm.tags.enableId3v1">ID3v1</n-checkbox>
-                  <n-checkbox v-model:checked="downloadForm.tags.enableId3v2">ID3v2</n-checkbox>
-                </div>
-                <div class="grid gap-2 sm:grid-cols-2">
-                  <div>
-                    <p class="m-0 text-xs text-[#9ab4d8]">ID3v2 版本</p>
-                    <n-radio-group v-model:value="downloadForm.tags.id3v2Version" class="flex flex-col gap-1">
-                      <n-radio value="2.4">ID3v2.4</n-radio>
-                      <n-radio value="2.3">ID3v2.3</n-radio>
-                    </n-radio-group>
+              <div class="rounded-lg bg-[#0f1320]/50 p-3">
+                <p class="m-0 text-sm font-medium text-[#9ab4d8]">下载限速</p>
+                <div class="mt-2 space-y-2">
+                  <n-radio-group v-model:value="downloadForm.speedLimitMode" class="flex gap-4">
+                    <n-radio value="auto">自动</n-radio>
+                    <n-radio value="manual">手动</n-radio>
+                  </n-radio-group>
+                  <div v-if="downloadForm.speedLimitMode === 'manual'" class="flex items-center gap-3">
+                    <n-slider v-model:value="downloadForm.speedLimit" :step="256" :min="512" :max="8192" class="flex-1" />
+                    <n-tag type="info">{{ downloadForm.speedLimit }} MB</n-tag>
                   </div>
-                  <div>
-                    <p class="m-0 text-xs text-[#9ab4d8]">标签编码</p>
-                    <n-radio-group v-model:value="downloadForm.tags.charset" class="flex flex-col gap-1">
-                      <n-radio value="utf8">UTF8（推荐）</n-radio>
-                      <n-radio value="auto">自动转换</n-radio>
-                      <n-radio value="iso-8859-1">ISO-8859-1</n-radio>
-                    </n-radio-group>
+                </div>
+              </div>
+              <div class="rounded-lg bg-[#0f1320]/50 p-3">
+                <p class="m-0 text-sm font-medium text-[#9ab4d8]">MP3 标签编码</p>
+                <div class="mt-2 space-y-3">
+                  <div class="flex flex-wrap gap-4">
+                    <n-checkbox v-model:checked="downloadForm.tags.enableApev2">APEv2</n-checkbox>
+                    <n-checkbox v-model:checked="downloadForm.tags.enableId3v1">ID3v1</n-checkbox>
+                    <n-checkbox v-model:checked="downloadForm.tags.enableId3v2">ID3v2</n-checkbox>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p class="m-0 text-xs text-[#9ab4d8]">ID3v2 版本</p>
+                      <n-radio-group v-model:value="downloadForm.tags.id3v2Version" class="mt-1 flex flex-col gap-1">
+                        <n-radio value="2.4">ID3v2.4</n-radio>
+                        <n-radio value="2.3">ID3v2.3</n-radio>
+                      </n-radio-group>
+                    </div>
+                    <div>
+                      <p class="m-0 text-xs text-[#9ab4d8]">标签编码</p>
+                      <n-radio-group v-model:value="downloadForm.tags.charset" class="mt-1 flex flex-col gap-1">
+                        <n-radio value="utf8">UTF8（推荐）</n-radio>
+                        <n-radio value="auto">自动转换</n-radio>
+                        <n-radio value="iso-8859-1">ISO-8859-1</n-radio>
+                      </n-radio-group>
+                    </div>
                   </div>
                 </div>
               </div>
