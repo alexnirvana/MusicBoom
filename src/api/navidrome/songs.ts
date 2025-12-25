@@ -107,6 +107,7 @@ async function fetchSongsByAlbum(
       coverUrl: buildCoverUrl(baseUrl, auth, item.coverArt || album.coverArt),
       size: item.size,
       comment: item.comment,
+      created: item.created,
     }));
 }
 
@@ -221,6 +222,7 @@ export async function getSongById(
         duration: normalized.duration || 0,
         coverUrl: buildCoverUrl(baseUrl, auth, normalized.coverArt),
         size: normalized.size,
+        created: normalized.created,
       };
     }
   }

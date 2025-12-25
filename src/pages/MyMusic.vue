@@ -168,6 +168,7 @@ async function toggleFavorite(row: NavidromeSong) {
       artist: row.artist,
       album: row.album,
       duration: row.duration,
+      created: row.created,
     });
     favoriteIds.value.add(row.id);
     favoriteIds.value = new Set(favoriteIds.value);

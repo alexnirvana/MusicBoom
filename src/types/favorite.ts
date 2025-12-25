@@ -5,4 +5,5 @@ export interface FavoriteRow {
   artist: string;
   album: string;
   duration: number;
+  created?: string;
 }

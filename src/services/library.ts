@@ -8,6 +8,7 @@ export interface LocalSongRecord {
   album: string;
   size: number;
   path: string;
+  created?: string;
 }
 
 export type DownloadStatus = "pending" | "downloading" | "success" | "failed" | "cancelled";
@@ -33,7 +34,8 @@ const INIT_SQLS = [
       artist TEXT NOT NULL,
       album TEXT NOT NULL,
       size INTEGER NOT NULL,
-      path TEXT NOT NULL
+      path TEXT NOT NULL,
+      created TEXT
     )
   `,
   `
@@ -58,24 +60,46 @@ async function getDb() {
       for (const sql of INIT_SQLS) {
         await db.execute(sql);
       }
+      await migrateDatabase(db);
       return db;
     });
   }
   return dbPromise;
 }
 
+// 检查并迁移数据库结构，为现有表添加 created 列
+async function migrateDatabase(db: Awaited<ReturnType<typeof Database.load>>) {
+  try {
+    const tablesToMigrate = ['local_music', 'downloads'];
+    for (const tableName of tablesToMigrate) {
+      const tables = await db.select<{ name: string }[]>(`SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}'`);
+      if (tables.length === 0) {
+        continue;
+      }
+
+      const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`);
+      const hasCreatedColumn = columns.some(col => col.name === 'created');
+      if (!hasCreatedColumn) {
+        await db.execute(`ALTER TABLE ${tableName} ADD COLUMN created TEXT`);
+      }
+    }
+  } catch (error) {
+    console.error('数据库迁移失败:', error);
+  }
+}
+
 export async function upsertLocalSong(record: LocalSongRecord) {
   const db = await getDb();
   await db.execute(
-    `REPLACE INTO local_music (id, title, artist, album, size, path) VALUES (?, ?, ?, ?, ?, ?)`,
-    [record.id, record.title, record.artist, record.album, record.size, record.path]
+    `REPLACE INTO local_music (id, title, artist, album, size, path, created) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [record.id, record.title, record.artist, record.album, record.size, record.path, record.created || null]
   );
 }
 
 export async function listLocalSongs(): Promise<LocalSongRecord[]> {
   const db = await getDb();
   const rows = await db.select<LocalSongRecord[]>(
-    `SELECT id, title, artist, album, size, path FROM local_music ORDER BY title COLLATE NOCASE`
+    `SELECT id, title, artist, album, size, path, created FROM local_music ORDER BY title COLLATE NOCASE`
   );
   return rows;
 }

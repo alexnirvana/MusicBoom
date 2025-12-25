@@ -52,6 +52,7 @@ async function loadFavoriteSongs() {
       artist: item.artist,
       album: item.album,
       duration: item.duration,
+      created: item.created,
     }));
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
@@ -101,6 +102,7 @@ async function toggleFavorite(row: NavidromeSong) {
         artist: row.artist,
         album: row.album,
         duration: row.duration,
+        created: row.created,
       });
       message.success("已添加到收藏");
     }

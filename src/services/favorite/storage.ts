@@ -5,7 +5,7 @@ import { getFavoriteDb } from "./db";
 export async function listFavorites(): Promise<FavoriteRow[]> {
   const db = await getFavoriteDb();
   return db.select<FavoriteRow[]>(
-    `SELECT song_id as songId, title, artist, album, duration FROM favorites ORDER BY title`
+    `SELECT song_id as songId, title, artist, album, duration, created FROM favorites ORDER BY title`
   );
 }
 
@@ -23,10 +23,10 @@ export async function isFavorite(songId: string): Promise<boolean> {
 export async function addFavorite(row: FavoriteRow) {
   const db = await getFavoriteDb();
   await db.execute(
-    `INSERT INTO favorites (song_id, title, artist, album, duration)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT(song_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, album = excluded.album, duration = excluded.duration`,
-    [row.songId, row.title, row.artist, row.album, row.duration]
+    `INSERT INTO favorites (song_id, title, artist, album, duration, created)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT(song_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, album = excluded.album, duration = excluded.duration, created = excluded.created`,
+    [row.songId, row.title, row.artist, row.album, row.duration, row.created || null]
   );
 }
 

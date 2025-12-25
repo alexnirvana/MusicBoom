@@ -73,6 +73,25 @@ function formatDuration(seconds: number) {
   return `${minutes}:${remain.toString().padStart(2, "0")}`;
 }
 
+// 将 UTC 时间转换为北京时间并格式化
+function formatCreatedTime(utcTime?: string): string {
+  if (!utcTime) return "-";
+  try {
+    const date = new Date(utcTime);
+    if (isNaN(date.getTime())) return "-";
+    const beijingTime = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+    const year = beijingTime.getUTCFullYear();
+    const month = String(beijingTime.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(beijingTime.getUTCDate()).padStart(2, "0");
+    const hours = String(beijingTime.getUTCHours()).padStart(2, "0");
+    const minutes = String(beijingTime.getUTCMinutes()).padStart(2, "0");
+    const seconds = String(beijingTime.getUTCSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  } catch {
+    return "-";
+  }
+}
+
 // 渲染带颜色的图标，便于复用
 function renderIcon(icon: Component, color = "#9ab4d8") {
   return () => h(NIcon, { size: 18, color }, { default: () => h(icon) });
@@ -118,6 +137,13 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
   { title: "歌手", key: "artist", minWidth: 140, ellipsis: true },
   { title: "专辑", key: "album", minWidth: 160, ellipsis: true },
   { title: "时长", key: "duration", width: 100, render: (row) => formatDuration(row.duration) },
+  {
+    title: "创建时间",
+    key: "created",
+    minWidth: 180,
+    ellipsis: true,
+    render: (row) => formatCreatedTime(row.created),
+  },
   {
     title: "下载状态",
     key: "download",
