@@ -18,13 +18,8 @@ import {
   VolumeHighOutline,
 } from "@vicons/ionicons5";
 import { usePlayerStore } from "../stores/player";
+import { useFavoriteStore } from "../stores/favorites";
 import type { PlayMode } from "../types/player";
-import {
-  addFavorite,
-  isFavorite,
-  listFavorites,
-  removeFavorite,
-} from "../services/favorite";
 import PlaylistNotification from "./PlaylistNotification.vue";
 import type { NavidromeSong } from "../types/navidrome";
 import { useRouter } from "../utils/router-lite";
@@ -37,6 +32,7 @@ const props = withDefaults(defineProps<{ offsetLeft?: number }>(), {
 
 // 复用播放器全局状态
 const player = usePlayerStore();
+const favorites = useFavoriteStore();
 const message = useMessage();
 const playlistPanelRef = ref<InstanceType<typeof PlaylistNotification> | null>(null);
 const playerBarRef = ref<HTMLElement | null>(null);
@@ -61,8 +57,6 @@ onBeforeUnmount(() => {
 const isCurrentFavorite = ref(false);
 const favoriteLoading = ref(false);
 let favoriteCheckToken = 0;
-const favoriteIds = ref<Set<string>>(new Set());
-const favoritesReady = ref(false);
 
 const IconLoop = {
   name: "IconLoop",
@@ -185,7 +179,7 @@ async function refreshFavoriteStatus(songId: string | null) {
 
   favoriteLoading.value = true;
   try {
-    const result = await isFavorite(songId);
+    const result = favorites.isFavorite(songId);
     if (token !== favoriteCheckToken) return;
     isCurrentFavorite.value = result;
   } catch (error) {
@@ -198,28 +192,6 @@ async function refreshFavoriteStatus(songId: string | null) {
       favoriteLoading.value = false;
     }
   }
-}
-
-// 读取收藏库供播放列表弹窗使用
-async function loadFavoriteSet() {
-  try {
-    const records = await listFavorites();
-    favoriteIds.value = new Set(records.map((item) => item.songId));
-    favoritesReady.value = true;
-  } catch (error) {
-    const hint = error instanceof Error ? error.message : String(error);
-    message.warning(`读取收藏状态失败：${hint}`);
-  }
-}
-
-// 维护收藏集合，便于播放列表快捷标记
-function updateFavoriteCache(songId: string, favored: boolean) {
-  if (favored) {
-    favoriteIds.value.add(songId);
-  } else {
-    favoriteIds.value.delete(songId);
-  }
-  favoriteIds.value = new Set(favoriteIds.value);
 }
 
 // 播放歌曲切换时立即检查收藏状态
@@ -239,28 +211,20 @@ async function toggleFavorite() {
   const token = ++favoriteCheckToken;
   favoriteLoading.value = true;
   try {
-    if (isCurrentFavorite.value) {
-      await removeFavorite(track.id);
-      if (token === favoriteCheckToken) {
-        isCurrentFavorite.value = false;
+    const isFav = await favorites.toggleFavorite(
+      track.id,
+      {
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: track.duration,
+        created: track.created,
       }
-      updateFavoriteCache(track.id, false);
-      message.success("已取消收藏");
-      return;
-    }
-
-    await addFavorite({
-      songId: track.id,
-      title: track.title,
-      artist: track.artist,
-      album: track.album,
-      duration: track.duration,
-    });
+    );
     if (token === favoriteCheckToken) {
-      isCurrentFavorite.value = true;
+      isCurrentFavorite.value = isFav;
     }
-    updateFavoriteCache(track.id, true);
-    message.success("已添加到收藏");
+    message.success(isFav ? "已添加到收藏" : "已取消收藏");
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     message.error(`更新收藏状态失败：${hint}`);
@@ -283,30 +247,21 @@ async function handlePlayFromPlaylist(songId: string) {
 
 // 播放列表内的收藏切换
 async function toggleFavoriteFromPlaylist(song: NavidromeSong) {
-  const isFav = favoriteIds.value.has(song.id);
   try {
-    if (isFav) {
-      await removeFavorite(song.id);
-      updateFavoriteCache(song.id, false);
-      if (song.id === player.currentTrack.value?.id) {
-        isCurrentFavorite.value = false;
+    const isFav = await favorites.toggleFavorite(
+      song.id,
+      {
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        duration: song.duration,
+        created: song.created,
       }
-      message.success("已取消收藏");
-      return;
-    }
-
-    await addFavorite({
-      songId: song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album,
-      duration: song.duration,
-    });
-    updateFavoriteCache(song.id, true);
+    );
     if (song.id === player.currentTrack.value?.id) {
-      isCurrentFavorite.value = true;
+      isCurrentFavorite.value = isFav;
     }
-    message.success("已添加到收藏");
+    message.success(isFav ? "已添加到收藏" : "已取消收藏");
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);
     message.error(`更新收藏状态失败：${hint}`);
@@ -331,15 +286,12 @@ function closePlaylistPanel() {
 }
 
 async function togglePlaylistPanel() {
-  if (!favoritesReady.value) {
-    await loadFavoriteSet();
-  }
   playlistPanelRef.value?.toggle();
 }
 
 // 播放列表的定位事件：根据收藏状态跳转到对应页面并广播定位请求
 function handleLocateFromPlaylist(song: NavidromeSong) {
-  const target = favoriteIds.value.has(song.id) ? { name: "favorites" } : { name: "my-music" };
+  const target = favorites.isFavorite(song.id) ? { name: "favorites" } : { name: "my-music" };
   router.push(target);
   emitLocateRequest(song);
   closePlaylistPanel();
@@ -564,7 +516,7 @@ watch(
         ref="playlistPanelRef"
         :songs="player.state.playlist"
         :current-id="player.currentTrack.value?.id || ''"
-        :favorite-ids="favoriteIds"
+        :favorite-ids="favorites.state.favoriteIds"
         @play="handlePlayFromPlaylist"
         @toggle-favorite="toggleFavoriteFromPlaylist"
         @clear="handleClearPlaylist"

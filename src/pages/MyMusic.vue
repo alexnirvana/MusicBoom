@@ -7,7 +7,6 @@ import { getSongs, type FetchSongsOptions, type NavidromeSong } from "../api/nav
 import { useAuthStore } from "../stores/auth";
 import { useSettingsStore } from "../stores/settings";
 import { usePlayerStore } from "../stores/player";
-import { addFavorite, listFavorites, removeFavorite } from "../services/favorite";
 import { useRouter } from "../utils/router-lite";
 import { listenLocateRequest } from "../utils/playlist-locator";
 import { checkSongsDownloadStatus } from "../utils/download-status";
@@ -17,7 +16,6 @@ import { extractAppAnchorId, type AnchorStatus } from "../utils/anchor-status";
 // 状态管理：加载态、歌曲列表、收藏集
 const loading = ref(false);
 const songs = ref<NavidromeSong[]>([]);
-const favoriteIds = ref<Set<string>>(new Set());
 const downloadStatuses = ref(new Map<string, any>());
 const anchorStatuses = ref(new Map<string, AnchorStatus>());
 const message = useMessage();
@@ -57,17 +55,6 @@ async function loadSongs() {
     message.error(`获取歌曲列表失败：${fallback}`);
   } finally {
     loading.value = false;
-  }
-}
-
-// 读取收藏列表，保持表格中的爱心标记同步
-async function loadFavorites() {
-  try {
-    const records = await listFavorites();
-    favoriteIds.value = new Set(records.map((item) => item.songId));
-  } catch (error) {
-    const hint = error instanceof Error ? error.message : String(error);
-    message.error(`读取收藏状态失败：${hint}`);
   }
 }
 
@@ -150,35 +137,6 @@ async function handlePlayNext(payload: { row: NavidromeSong; list: NavidromeSong
   }
 }
 
-// 切换收藏状态，空心表示未收藏，红色实心表示已收藏
-async function toggleFavorite(row: NavidromeSong) {
-  const isFav = favoriteIds.value.has(row.id);
-  try {
-    if (isFav) {
-      await removeFavorite(row.id);
-      favoriteIds.value.delete(row.id);
-      favoriteIds.value = new Set(favoriteIds.value);
-      message.success("已取消收藏");
-      return;
-    }
-
-    await addFavorite({
-      songId: row.id,
-      title: row.title,
-      artist: row.artist,
-      album: row.album,
-      duration: row.duration,
-      created: row.created,
-    });
-    favoriteIds.value.add(row.id);
-    favoriteIds.value = new Set(favoriteIds.value);
-    message.success("已添加到收藏");
-  } catch (error) {
-    const hint = error instanceof Error ? error.message : String(error);
-    message.error(`更新收藏状态失败：${hint}`);
-  }
-}
-
 function tryLocate(targetId: string) {
   const exists = songs.value.some((item) => item.id === targetId);
   if (!exists) return false;
@@ -208,7 +166,6 @@ watch(
 );
 
 onMounted(() => {
-  loadFavorites();
   loadSongs();
 });
 
@@ -248,12 +205,10 @@ onBeforeUnmount(() => {
         title="全部歌曲"
         :songs="songs"
         :loading="loading"
-        :favorite-ids="favoriteIds"
         :download-statuses="downloadStatuses"
         :anchor-statuses="anchorStatuses"
         empty-hint="暂无歌曲数据，尝试同步或检查 Navidrome 连接。"
         ref="tableRef"
-        @toggle-favorite="toggleFavorite"
         @play="handlePlay"
         @play-next="handlePlayNext"
       />

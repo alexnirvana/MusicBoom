@@ -6,19 +6,20 @@ import SongTable from "../components/SongTable.vue";
 import { useSettingsStore } from "../stores/settings";
 import { useAuthStore } from "../stores/auth";
 import { usePlayerStore } from "../stores/player";
-import { addFavorite, listFavorites, removeFavorite } from "../services/favorite";
+import { useFavoriteStore } from "../stores/favorites";
+import { listFavorites } from "../services/favorite";
 import type { FetchSongsOptions, NavidromeSong } from "../api/navidrome";
 import { useRouter } from "../utils/router-lite";
 import { listenLocateRequest } from "../utils/playlist-locator";
 
 // 收藏页使用数据库数据，单独维护列表与收藏状态集合
 const favoriteSongs = ref<NavidromeSong[]>([]);
-const favoriteIds = ref<Set<string>>(new Set());
 const loading = ref(false);
 const message = useMessage();
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
 const player = usePlayerStore();
+const favorites = useFavoriteStore();
 const tableRef = ref<InstanceType<typeof SongTable> | null>(null);
 const router = useRouter();
 const pendingLocateId = ref<string | null>(null);
@@ -45,7 +46,6 @@ async function loadFavoriteSongs() {
   loading.value = true;
   try {
     const records = await listFavorites();
-    favoriteIds.value = new Set(records.map((item) => item.songId));
     favoriteSongs.value = records.map<NavidromeSong>((item) => ({
       id: item.songId,
       title: item.title,
@@ -88,31 +88,6 @@ async function handlePlayNext(payload: { row: NavidromeSong; list: NavidromeSong
   }
 }
 
-// 收藏页允许直接取消收藏，并保持表格数据同步
-async function toggleFavorite(row: NavidromeSong) {
-  const isFav = favoriteIds.value.has(row.id);
-  try {
-    if (isFav) {
-      await removeFavorite(row.id);
-      message.success("已取消收藏");
-    } else {
-      await addFavorite({
-        songId: row.id,
-        title: row.title,
-        artist: row.artist,
-        album: row.album,
-        duration: row.duration,
-        created: row.created,
-      });
-      message.success("已添加到收藏");
-    }
-    await loadFavoriteSongs();
-  } catch (error) {
-    const hint = error instanceof Error ? error.message : String(error);
-    message.error(`更新收藏状态失败：${hint}`);
-  }
-}
-
 function tryLocate(targetId: string) {
   const exists = favoriteSongs.value.some((item) => item.id === targetId);
   if (!exists) return false;
@@ -141,9 +116,18 @@ watch(
   }
 );
 
-onMounted(() => {
+onMounted(async () => {
+  await favorites.ready;
   loadFavoriteSongs();
 });
+
+// 监听全局收藏状态刷新，自动更新收藏列表
+watch(
+  () => favorites.state.refreshCounter,
+  () => {
+    loadFavoriteSongs();
+  }
+);
 
 onBeforeUnmount(() => {
   stopLocate();
@@ -168,10 +152,8 @@ onBeforeUnmount(() => {
         title="我喜欢的歌曲"
         :songs="favoriteSongs"
         :loading="loading"
-        :favorite-ids="favoriteIds"
         empty-hint="尚未收藏任何歌曲，去曲库里点亮小爱心吧！"
         ref="tableRef"
-        @toggle-favorite="toggleFavorite"
         @play="handlePlay"
         @play-next="handlePlayNext"
       />

@@ -18,6 +18,7 @@ import {
 import { computed, h, nextTick, ref, type Component, type PropType } from "vue";
 import type { NavidromeSong } from "../types/navidrome";
 import { usePlaylistsStore } from "../stores/playlists";
+import { useFavoriteStore } from "../stores/favorites";
 import type { DownloadStatus } from "../utils/download-status";
 import type { AnchorStatus } from "../utils/anchor-status";
 
@@ -26,7 +27,6 @@ const props = defineProps({
   title: { type: String, default: "歌曲列表" },
   songs: { type: Array as PropType<NavidromeSong[]>, default: () => [] },
   loading: { type: Boolean, default: false },
-  favoriteIds: { type: Object as PropType<Set<string>>, default: () => new Set<string>() },
   downloadStatuses: { type: Object as PropType<Map<string, DownloadStatus>>, default: () => new Map() },
   anchorStatuses: { type: Object as PropType<Map<string, AnchorStatus>>, default: () => new Map() },
   emptyHint: { type: String, default: "暂无歌曲数据，尝试同步或检查连接。" },
@@ -34,18 +34,18 @@ const props = defineProps({
 });
 
 const emit = defineEmits<{
-  (event: "toggle-favorite", row: NavidromeSong): void;
   (event: "play", payload: { row: NavidromeSong; list: NavidromeSong[] }): void;
   (event: "play-next", payload: { row: NavidromeSong; list: NavidromeSong[] }): void;
 }>();
 
+// 获取歌单列表、收藏状态和消息提示
+const playlists = usePlaylistsStore();
+const favorites = useFavoriteStore();
+const message = useMessage();
+
 // 记录双击选中的行，便于高亮当前歌曲
 const activeRowId = ref<string | null>(null);
 const tableWrapperRef = ref<HTMLElement | null>(null);
-
-// 获取歌单列表和消息提示
-const playlists = usePlaylistsStore();
-const message = useMessage();
 
 // 右键菜单的可见性与定位，结合当前行数据动态渲染
 const showContextMenu = ref(false);
@@ -104,7 +104,7 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     key: "favorite",
     width: 90,
     render: (row) => {
-      const isFav = props.favoriteIds.has(row.id);
+      const isFav = favorites.isFavorite(row.id);
       return h(
         NButton,
         {
@@ -113,7 +113,7 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
           size: "small",
           onClick: (event: MouseEvent) => {
             event.stopPropagation();
-            emit("toggle-favorite", row);
+            handleToggleFavorite(row);
           },
         },
         {
@@ -219,7 +219,7 @@ function rowClassName(row: NavidromeSong) {
 
 // 右键菜单选项，收藏状态动态切换爱心样式
 const dropdownOptions = computed<(DropdownOption | DropdownDividerOption | DropdownGroupOption)[]>(() => {
-  const isFav = contextRow.value ? props.favoriteIds.has(contextRow.value.id) : false;
+  const isFav = contextRow.value ? favorites.isFavorite(contextRow.value.id) : false;
 
   // 构建歌单子菜单选项
   const playlistChildren = playlists.state.items.map((p) => ({
@@ -263,6 +263,26 @@ const dropdownOptions = computed<(DropdownOption | DropdownDividerOption | Dropd
   ];
 });
 
+// 切换收藏状态
+async function handleToggleFavorite(row: NavidromeSong) {
+  try {
+    const isFav = await favorites.toggleFavorite(
+      row.id,
+      {
+        title: row.title,
+        artist: row.artist,
+        album: row.album,
+        duration: row.duration,
+        created: row.created,
+      }
+    );
+    message.success(isFav ? "已添加到收藏" : "已取消收藏");
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`更新收藏状态失败：${hint}`);
+  }
+}
+
 // 处理菜单点击，派发对应的操作
 function handleMenuSelect(key: string | number) {
   const target = contextRow.value;
@@ -281,7 +301,7 @@ function handleMenuSelect(key: string | number) {
   }
 
   if (key === "favorite") {
-    emit("toggle-favorite", target);
+    handleToggleFavorite(target);
     return;
   }
 
