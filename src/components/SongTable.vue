@@ -132,16 +132,41 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     key: "title",
     minWidth: 200,
     ellipsis: true,
+    sorter: (row1, row2) => row1.title.localeCompare(row2.title),
     render: (row) => h("span", { class: "text-white font-semibold" }, row.title),
   },
-  { title: "歌手", key: "artist", minWidth: 140, ellipsis: true },
-  { title: "专辑", key: "album", minWidth: 160, ellipsis: true },
-  { title: "时长", key: "duration", width: 100, render: (row) => formatDuration(row.duration) },
+  { 
+    title: "歌手", 
+    key: "artist", 
+    minWidth: 140, 
+    ellipsis: true,
+    sorter: (row1, row2) => row1.artist.localeCompare(row2.artist),
+  },
+  { 
+    title: "专辑", 
+    key: "album", 
+    minWidth: 160, 
+    ellipsis: true,
+    sorter: (row1, row2) => row1.album.localeCompare(row2.album),
+  },
+  { 
+    title: "时长", 
+    key: "duration", 
+    width: 100, 
+    sorter: (row1, row2) => row1.duration - row2.duration,
+    render: (row) => formatDuration(row.duration) 
+  },
   {
     title: "创建时间",
     key: "created",
     minWidth: 180,
     ellipsis: true,
+    sorter: (row1, row2) => {
+      if (!row1.created && !row2.created) return 0;
+      if (!row1.created) return 1;
+      if (!row2.created) return -1;
+      return new Date(row1.created).getTime() - new Date(row2.created).getTime();
+    },
     render: (row) => formatCreatedTime(row.created),
   },
   {
