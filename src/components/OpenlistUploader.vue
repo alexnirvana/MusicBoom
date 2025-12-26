@@ -218,6 +218,21 @@ const handleFileChange = (event: Event) => {
   target.value = "";
 };
 
+// 重试单个失败的任务
+const retryTask = async (task: UploadItem) => {
+  if (task.status !== "error") return;
+
+  task.status = "pending";
+  task.message = undefined;
+  task.progress = 0;
+  task.speed = 0;
+
+  // 如果当前没有在上传，启动队列处理
+  if (!uploading.value) {
+    processQueue();
+  }
+};
+
 // 顺序处理队列，便于显示速度和进度
 const processQueue = async () => {
   if (uploading.value) return;
@@ -268,6 +283,9 @@ const processQueue = async () => {
 
       completedCount++;
       emit("uploaded");
+
+      // 在文件之间添加延迟，避免服务器压力过大
+      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
       console.error(`[Upload] Failed to upload ${task.name}:`, error);
       const fallback = error instanceof Error ? error.message : String(error);
@@ -389,6 +407,9 @@ const processQueue = async () => {
               {{ task.message }}
             </p>
             <p v-else-if="task.status === 'success'" class="mt-2 text-xs text-green-400">上传完成</p>
+            <div v-if="task.status === 'error'" class="mt-2">
+              <n-button size="tiny" type="primary" @click="retryTask(task)">重试</n-button>
+            </div>
           </div>
         </div>
       </n-scrollbar>
