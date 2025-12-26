@@ -44,6 +44,19 @@ export interface PlaybackSettings {
   crossfadeDuration: number;
 }
 
+export interface MysqlConfig {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+}
+
+export interface MysqlTestResult {
+  success: boolean;
+  message: string;
+}
+
 export interface SettingsState {
   navidrome: NavidromeConfig;
   openlist: OpenlistConfig;

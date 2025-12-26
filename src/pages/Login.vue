@@ -2,24 +2,41 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useMessage } from "naive-ui";
 import { loginNavidrome } from "../api/navidrome";
+import { testMysqlConnection } from "../api/mysql";
 import { useAuthStore } from "../stores/auth";
 import { usePlayerStore } from "../stores/player";
 import type { LoginPayload } from "../types/auth";
+import type { MysqlConfig } from "../types/settings";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import FramelessWindow from "../components/FramelessWindow.vue";
-import { useSettingsStore } from "../stores/settings";
-import type { DownloadSettings } from "../types/settings";
 import { appCacheDir, downloadDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir } from "@tauri-apps/plugin-fs";
+import { mysqlConnectionManager } from "../services/mysql-connection";
+import { mysqlConfigManager } from "../services/mysql-config";
+import { navidromeConfigManager } from "../services/navidrome-config";
+import { pathConfigManager } from "../services/path-config";
 
 const message = useMessage();
 const { setSession } = useAuthStore();
 const player = usePlayerStore();
 const loading = ref(false);
 const currentWindow = getCurrentWindow();
-const { state: settingsState, ready: settingsReady, updateDownload, updateNavidrome } =
-  useSettingsStore();
+
+// Navidrome配置
+const navidromeConfigReady = ref(false);
+
+// MySQL配置
+const showMysqlModal = ref(false);
+const mysqlForm = reactive<MysqlConfig>({
+  host: "localhost",
+  port: 3306,
+  database: "",
+  username: "",
+  password: "",
+});
+const savingMysql = ref(false);
+const testingMysql = ref(false);
 
 // 登录成功后唤起主窗口，避免让登录窗口承担过多边框和布局
 async function openMainWindow() {
@@ -80,25 +97,28 @@ const form = reactive<LoginPayload>({
 
 const remember = ref(false);
 
-// 从设置表读取已保存的登录信息
+// 从配置文件读取已保存的登录信息
 async function loadSavedCredential() {
   try {
-    await settingsReady;
-    const saved = settingsState.navidrome;
-    form.baseUrl = saved.baseUrl || "http://";
-    form.username = saved.username || "";
-    form.password = saved.password || "";
-    remember.value = Boolean(saved.remember);
+    await navidromeConfigManager.initialize();
+    navidromeConfigReady.value = true;
+    const saved = navidromeConfigManager.getConfig();
+    if (saved) {
+      form.baseUrl = saved.baseUrl || "http://";
+      form.username = saved.username || "";
+      form.password = saved.password || "";
+      remember.value = Boolean(saved.remember);
+    }
   } catch (error) {
-    console.warn("读取登录信息失败", error);
+    console.warn("读取 Navidrome 配置失败", error);
   }
 }
 
-// 根据勾选状态决定是否持久化到设置表
+// 根据勾选状态决定是否持久化到配置文件
 async function persistCredential() {
   try {
     if (!remember.value) {
-      await updateNavidrome({
+      await navidromeConfigManager.saveConfig({
         baseUrl: "",
         username: "",
         password: "",
@@ -107,7 +127,7 @@ async function persistCredential() {
       return;
     }
 
-    await updateNavidrome({
+    await navidromeConfigManager.saveConfig({
       baseUrl: form.baseUrl,
       username: form.username,
       password: form.password,
@@ -122,14 +142,15 @@ async function persistCredential() {
 
 // 登录后立即确保下载目录与缓存目录存在，避免需要先打开设置页
 async function ensureDownloadDirectories() {
-  // 先等待设置数据加载完成，保证拿到用户自定义的路径
-  await settingsReady.catch((error) => {
-    console.warn("读取设置时出现问题，改用默认路径", error);
+  // 初始化路径配置管理器
+  await pathConfigManager.initialize().catch((error) => {
+    console.warn("初始化路径配置失败", error);
   });
 
-  const pendingUpdate: Partial<DownloadSettings> = {};
-  let musicDir = settingsState.download.musicDir.trim();
-  let cacheDir = settingsState.download.cacheDir.trim();
+  const pendingUpdate: { musicDir?: string; cacheDir?: string } = {};
+  const pathConfig = pathConfigManager.getConfig();
+  let musicDir = pathConfig?.musicDir?.trim() || "";
+  let cacheDir = pathConfig?.cacheDir?.trim() || "";
 
   if (!musicDir) {
     try {
@@ -157,7 +178,7 @@ async function ensureDownloadDirectories() {
   if (cacheDir) await ensureDirectory(cacheDir, "缓存目录");
 
   if (Object.keys(pendingUpdate).length > 0) {
-    await updateDownload(pendingUpdate);
+    await pathConfigManager.saveConfig(pendingUpdate);
   }
 }
 
@@ -177,6 +198,10 @@ async function ensureDirectory(target: string, label: string) {
 
 onMounted(() => {
   loadSavedCredential();
+  // 初始化 MySQL 配置管理器
+  mysqlConfigManager.initialize().catch(error => {
+    console.error("初始化 MySQL 配置失败:", error);
+  });
 });
 
 // 只有当所有输入都非空时才允许提交
@@ -184,9 +209,50 @@ const submitDisabled = computed(() =>
   !form.baseUrl.trim() || !form.username.trim() || !form.password.trim()
 );
 
+// 测试MySQL连接
+async function testMysqlBeforeLogin(): Promise<boolean> {
+  try {
+    const mysqlConfig = mysqlConfigManager.getConfig();
+
+    // 检查MySQL配置是否完整
+    if (!mysqlConfig || !mysqlConfig.host || !mysqlConfig.database || !mysqlConfig.username) {
+      message.warning("请先配置MySQL连接信息");
+      openMysqlModal();
+      return false;
+    }
+
+    // 测试MySQL连接
+    const result = await testMysqlConnection(mysqlConfig);
+
+    if (!result.success) {
+      message.error(`MySQL连接失败: ${result.message}`);
+      openMysqlModal();
+      return false;
+    }
+
+    // 初始化MySQL连接并切换到MySQL存储
+    await mysqlConnectionManager.initialize(mysqlConfig);
+    message.success("MySQL连接成功");
+
+    return true;
+  } catch (error) {
+    console.error("测试MySQL连接失败:", error);
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`MySQL连接测试出错: ${fallback}`);
+    openMysqlModal();
+    return false;
+  }
+}
+
 async function handleSubmit() {
   loading.value = true;
   try {
+    // 先测试MySQL连接
+    const mysqlConnected = await testMysqlBeforeLogin();
+    if (!mysqlConnected) {
+      return;
+    }
+
     const result = await loginNavidrome(form);
     await setSession({ ...result, baseUrl: form.baseUrl });
     await player.restoreFromSnapshot({
@@ -209,7 +275,7 @@ async function handleSubmit() {
     }
 
     message.success(`登录成功`);
-    
+
     // 延迟关闭当前窗口，确保主窗口有时间加载
     setTimeout(async () => {
       try {
@@ -229,6 +295,59 @@ async function handleSubmit() {
 
 function handleCancel() {
   currentWindow.close();
+}
+
+// MySQL配置相关函数
+async function loadMysqlConfig() {
+  try {
+    await mysqlConfigManager.initialize();
+    const config = mysqlConfigManager.getConfig();
+    if (config) {
+      Object.assign(mysqlForm, { ...config });
+    }
+  } catch (error) {
+    console.warn("读取MySQL配置失败", error);
+  }
+}
+
+function openMysqlModal() {
+  loadMysqlConfig();
+  showMysqlModal.value = true;
+}
+
+function closeMysqlModal() {
+  showMysqlModal.value = false;
+}
+
+async function handleTestMysql() {
+  testingMysql.value = true;
+  try {
+    const result = await testMysqlConnection(mysqlForm);
+    if (result.success) {
+      message.success(result.message);
+    } else {
+      message.error(result.message);
+    }
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`测试MySQL连接失败：${fallback}`);
+  } finally {
+    testingMysql.value = false;
+  }
+}
+
+async function handleSaveMysql() {
+  savingMysql.value = true;
+  try {
+    await mysqlConfigManager.saveConfig({ ...mysqlForm });
+    message.success("MySQL配置已保存");
+    closeMysqlModal();
+  } catch (error) {
+    const fallback = error instanceof Error ? error.message : String(error);
+    message.error(`保存MySQL配置失败：${fallback}`);
+  } finally {
+    savingMysql.value = false;
+  }
 }
 </script>
 
@@ -316,10 +435,97 @@ function handleCancel() {
               取消
             </n-button>
           </div>
+
+          <div class="flex justify-center pt-2">
+            <n-button
+              type="default"
+              size="small"
+              quaternary
+              @click="openMysqlModal"
+              class="text-white/60 hover:text-white"
+            >
+              <template #icon>
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </template>
+              MySQL设置
+            </n-button>
+          </div>
         </n-form>
       </div>
     </div>
   </FramelessWindow>
+
+  <!-- MySQL配置对话框 -->
+  <n-modal
+    v-model:show="showMysqlModal"
+    preset="card"
+    title="MySQL连接配置"
+    :bordered="false"
+    :style="{ width: '360px' }"
+    :segmented="{ content: 'soft' }"
+  >
+    <n-form
+      :model="mysqlForm"
+      label-placement="left"
+      :show-feedback="false"
+      label-width="60px"
+      label-align="right"
+      class="space-y-2"
+    >
+      <n-form-item label="主机">
+        <n-input
+          v-model:value="mysqlForm.host"
+          placeholder="localhost"
+          clearable
+          size="small"
+        />
+      </n-form-item>
+      <n-form-item label="端口">
+        <n-input-number
+          v-model:value="mysqlForm.port"
+          :min="1"
+          :max="65535"
+          class="w-full"
+          size="small"
+        />
+      </n-form-item>
+      <n-form-item label="数据库">
+        <n-input
+          v-model:value="mysqlForm.database"
+          placeholder="musicboom"
+          clearable
+          size="small"
+        />
+      </n-form-item>
+      <n-form-item label="用户">
+        <n-input
+          v-model:value="mysqlForm.username"
+          placeholder="root"
+          clearable
+          size="small"
+        />
+      </n-form-item>
+      <n-form-item label="密码">
+        <n-input
+          v-model:value="mysqlForm.password"
+          type="password"
+          show-password-on="click"
+          placeholder="请输入密码"
+          size="small"
+        />
+      </n-form-item>
+    </n-form>
+    <template #footer>
+      <div class="flex justify-end gap-2">
+        <n-button size="small" @click="closeMysqlModal">取消</n-button>
+        <n-button size="small" @click="handleTestMysql" :loading="testingMysql">测试</n-button>
+        <n-button type="primary" size="small" color="#6366f1" :loading="savingMysql" @click="handleSaveMysql">保存</n-button>
+      </div>
+    </template>
+  </n-modal>
 </template>
 
 <style scoped>

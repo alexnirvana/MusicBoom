@@ -9,13 +9,15 @@ export interface PlaylistSummary {
 
 export async function listPlaylists(): Promise<PlaylistSummary[]> {
   const db = await getPlaylistDb();
-  const rows = await db.select<{ id: number; name: string; count: number }[]>(
+  if (!db) return [];
+
+  const result = await db.select(
     `SELECT p.id as id, p.name as name,
       (SELECT COUNT(1) FROM playlist_songs ps WHERE ps.playlist_id = p.id) as count
      FROM playlists p
-     ORDER BY name COLLATE NOCASE`
+     ORDER BY name COLLATE utf8mb4_unicode_ci`
   );
-  return rows.map((row) => ({
+  return (result as any[]).map((row: any) => ({
     ...row,
     id: String(row.id),
   }));
@@ -23,10 +25,12 @@ export async function listPlaylists(): Promise<PlaylistSummary[]> {
 
 export async function createPlaylist(name: string): Promise<{ id: string }> {
   const db = await getPlaylistDb();
+  if (!db) throw new Error("MySQL连接未初始化");
+
   try {
     await db.execute(`INSERT INTO playlists (name) VALUES (?)`, [name.trim()]);
-    const rows = await db.select<{ id: number }[]>(`SELECT last_insert_rowid() as id`);
-    const id = rows[0]?.id ?? 0;
+    const result = await db.select(`SELECT LAST_INSERT_ID() as id`);
+    const id = (result as any[])[0]?.id ?? 0;
     return { id: String(id) };
   } catch (error) {
     throw new Error("歌单名字已存在，请修改");
@@ -35,6 +39,8 @@ export async function createPlaylist(name: string): Promise<{ id: string }> {
 
 export async function renamePlaylist(id: string, name: string) {
   const db = await getPlaylistDb();
+  if (!db) return;
+
   try {
     await db.execute(`UPDATE playlists SET name = ? WHERE id = ?`, [name.trim(), Number(id)]);
   } catch (_error) {
@@ -44,11 +50,9 @@ export async function renamePlaylist(id: string, name: string) {
 
 export async function removePlaylist(id: string) {
   const db = await getPlaylistDb();
+  if (!db) return;
+
   try {
-    // 启用外键约束和级联删除
-    await db.execute(`PRAGMA foreign_keys = ON;`);
-    
-    // 删除歌单，由于设置了 ON DELETE CASCADE，关联的歌曲会自动删除
     await db.execute(`DELETE FROM playlists WHERE id = ?`, [Number(id)]);
   } catch (error) {
     console.error('删除歌单失败:', error);
@@ -58,21 +62,16 @@ export async function removePlaylist(id: string) {
 
 export async function listPlaylistSongs(playlistId: string): Promise<NavidromeSong[]> {
   const db = await getPlaylistDb();
-  const rows = await db.select<{
-    song_id: string;
-    title: string;
-    artist: string;
-    album: string;
-    duration: number;
-    size?: number;
-  }[]>(
+  if (!db) return [];
+
+  const result = await db.select(
     `SELECT song_id, title, artist, album, duration, size
      FROM playlist_songs
      WHERE playlist_id = ?
-     ORDER BY title COLLATE NOCASE`,
+     ORDER BY title COLLATE utf8mb4_unicode_ci`,
     [Number(playlistId)]
   );
-  return rows.map((r) => ({
+  return (result as any[]).map((r: any) => ({
     id: r.song_id,
     title: r.title,
     artist: r.artist,
@@ -85,11 +84,14 @@ export async function listPlaylistSongs(playlistId: string): Promise<NavidromeSo
 export async function addSongsToPlaylist(playlistId: string, songs: NavidromeSong[]) {
   if (!songs.length) return;
   const db = await getPlaylistDb();
+  if (!db) return;
+
   for (const s of songs) {
     await db.execute(
-      `INSERT OR REPLACE INTO playlist_songs
+      `INSERT INTO playlist_songs
        (playlist_id, song_id, title, artist, album, duration, size)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE title=VALUES(title), artist=VALUES(artist), album=VALUES(album), duration=VALUES(duration), size=VALUES(size)`,
       [Number(playlistId), s.id, s.title, s.artist, s.album, s.duration, s.size || null]
     );
   }

@@ -66,12 +66,12 @@ export async function checkSongsDownloadStatus(
       const record = recordMap.get(song.id);
       let isDownloaded = false;
       
-      console.log("[下载状态] 检查歌曲：", song.title, song.id, "记录：", record);
+      //console.log("[下载状态] 检查歌曲：", song.title, song.id, "记录：", record);
       
       if (record && record.status === "success" && record.filePath) {
         try {
           isDownloaded = await exists(record.filePath);
-          console.log("[下载状态] 文件存在性检查：", record.filePath, isDownloaded);
+          //console.log("[下载状态] 文件存在性检查：", record.filePath, isDownloaded);
         } catch (error) {
           console.warn("检查下载文件存在性失败:", error);
           isDownloaded = false;

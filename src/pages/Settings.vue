@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { appCacheDir, appDataDir, downloadDir, join } from "@tauri-apps/api/path";
+import { appCacheDir, downloadDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir, readDir, stat } from "@tauri-apps/plugin-fs";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -19,6 +19,7 @@ import type {
   PlaybackSettings,
 } from "../types/settings";
 import type { Ref } from "vue";
+import { pathConfigManager } from "../services/path-config";
 
 // 消息提示实例
 const message = useMessage();
@@ -28,7 +29,7 @@ const dialog = useDialog();
 const { state: authState } = useAuthStore();
 
 // 设置存储
-const { state: settingsState, ready, updateNavidrome, updateOpenlist, updateDownload, updateGeneral, updatePlayback } =
+const { state: settingsState, ready, updateOpenlist, updateDownload, updateGeneral, updatePlayback } =
   useSettingsStore();
 
 // Navidrome 连接配置表单
@@ -99,8 +100,8 @@ const serverAddress = computed(
   () => navidromeForm.baseUrl || authState.baseUrl || "尚未配置服务器地址"
 );
 
-// 预估插件-sql 默认的数据库位置
-const databasePath = ref("正在获取本地数据库路径...");
+// 预估MySQL连接信息
+const databasePath = ref("MySQL连接已配置");
 
 // 目录大小格式化，便于直观展示
 function formatBytes(bytes: number) {
@@ -178,13 +179,37 @@ async function refreshDirectorySize(dir: string, holder: Ref<string>, label: str
 }
 
 // 将存储中的数据同步到本地表单，避免直接编辑响应式全局状态
-function syncFormFromStore() {
-  Object.assign(navidromeForm, { ...settingsState.navidrome });
-  Object.assign(openlistForm, { ...settingsState.openlist });
+async function syncFormFromStore() {
+  try {
+    const { navidromeConfigManager } = await import("../services/navidrome-config");
+    await navidromeConfigManager.initialize();
+    const navidromeConfig = navidromeConfigManager.getConfig();
+    if (navidromeConfig) {
+      Object.assign(navidromeForm, navidromeConfig);
+    }
+  } catch (error) {
+    console.warn("读取 Navidrome 配置失败", error);
+  }
+
+  // 从 pathConfigManager 读取路径配置
+  try {
+    await pathConfigManager.initialize();
+    const pathConfig = pathConfigManager.getConfig();
+    if (pathConfig) {
+      downloadForm.musicDir = pathConfig.musicDir;
+      downloadForm.cacheDir = pathConfig.cacheDir;
+    }
+  } catch (error) {
+    console.warn("读取路径配置失败", error);
+  }
+
+  // 从数据库读取其他下载设置
   Object.assign(downloadForm, {
     ...settingsState.download,
     tags: { ...settingsState.download.tags },
   });
+
+  Object.assign(openlistForm, { ...settingsState.openlist });
   Object.assign(generalForm, { ...settingsState.general });
   Object.assign(playbackForm, { ...settingsState.playback });
 }
@@ -192,11 +217,17 @@ function syncFormFromStore() {
 // 初始化本地路径与表单数据
 onMounted(async () => {
   try {
-    const dir = await appDataDir();
-    databasePath.value = await join(dir, "musicboom.db");
+    const { mysqlConfigManager } = await import("../services/mysql-config");
+    await mysqlConfigManager.initialize();
+    const config = mysqlConfigManager.getConfig();
+    if (config) {
+      databasePath.value = `MySQL: ${config.username}@${config.host}:${config.port}/${config.database}`;
+    } else {
+      databasePath.value = "MySQL未配置";
+    }
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
-    databasePath.value = `获取数据库路径失败：${fallback}`;
+    databasePath.value = `获取数据库信息失败：${fallback}`;
   }
 
   try {
@@ -218,21 +249,23 @@ onMounted(async () => {
   }
 
   await ready;
-  syncFormFromStore();
-  const pendingDownloadUpdate: Partial<DownloadSettings> = {};
+  await syncFormFromStore();
+
+  // 如果路径为空，设置默认路径并保存
+  const pendingPathUpdate: { musicDir?: string; cacheDir?: string } = {};
 
   if (!downloadForm.musicDir && defaultMusicDir.value) {
     downloadForm.musicDir = defaultMusicDir.value;
-    pendingDownloadUpdate.musicDir = defaultMusicDir.value;
+    pendingPathUpdate.musicDir = defaultMusicDir.value;
   }
 
   if (!downloadForm.cacheDir && defaultCacheDir.value) {
     downloadForm.cacheDir = defaultCacheDir.value;
-    pendingDownloadUpdate.cacheDir = defaultCacheDir.value;
+    pendingPathUpdate.cacheDir = defaultCacheDir.value;
   }
 
-  if (Object.keys(pendingDownloadUpdate).length > 0) {
-    await updateDownload(pendingDownloadUpdate);
+  if (Object.keys(pendingPathUpdate).length > 0) {
+    await pathConfigManager.saveConfig(pendingPathUpdate);
   }
 });
 
@@ -253,11 +286,12 @@ watch(
   { immediate: true }
 );
 
-// 保存 Navidrome 连接信息到设置表
+// 保存 Navidrome 连接信息到配置文件
 async function handleSaveNavidrome() {
   savingNavidrome.value = true;
   try {
-    await updateNavidrome({ ...navidromeForm });
+    const { navidromeConfigManager } = await import("../services/navidrome-config");
+    await navidromeConfigManager.saveConfig({ ...navidromeForm });
     message.success("Navidrome 配置已保存");
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
@@ -285,7 +319,20 @@ async function handleSaveOpenlist() {
 async function handleSaveDownload() {
   savingDownload.value = true;
   try {
-    await updateDownload(JSON.parse(JSON.stringify(downloadForm)));
+    // 保存路径到本地配置文件
+    await pathConfigManager.saveConfig({
+      musicDir: downloadForm.musicDir,
+      cacheDir: downloadForm.cacheDir,
+    });
+
+    // 保存其他设置到数据库（排除 musicDir 和 cacheDir）
+    const downloadSettings = {
+      ...downloadForm,
+      musicDir: "",
+      cacheDir: "",
+    };
+    await updateDownload(downloadSettings);
+
     message.success("下载与缓存设置已保存");
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
@@ -403,8 +450,7 @@ async function clearDownloadDirectory() {
         message.success(result);
 
         // 同时清除数据库中的下载记录
-        const dbPath = await join(await appDataDir(), "musicboom.db");
-        await invoke<string>("clear_downloaded_songs", { dbPath });
+        await invoke<string>("clear_downloaded_songs");
 
         // 刷新目录大小
         await refreshDirectorySize(downloadForm.musicDir, musicDirSize, "下载目录");

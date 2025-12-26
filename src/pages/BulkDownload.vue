@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { exists, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { computed, h, onActivated, onMounted, ref } from "vue";
+import { computed, h, onActivated, onMounted, onUnmounted, ref } from "vue";
 import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { getSongs, buildStreamUrl, type NavidromeSong } from "../api/navidrome";
@@ -13,6 +13,7 @@ import { useRouter } from "../utils/router-lite";
 import { buildNavidromeContext } from "../utils/navidrome-context";
 import { resolveSongTargetPath } from "../utils/download-path";
 import { filterUndownloadedSongs } from "../utils/download-status";
+import { pathConfigManager } from "../services/path-config";
 
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
@@ -26,8 +27,9 @@ const downloading = ref(false);
 const allSongs = ref<NavidromeSong[]>([]);
 const songs = ref<NavidromeSong[]>([]);
 const checkedRowKeys = ref<string[]>([]);
+const pathConfig = ref<{ musicDir: string; cacheDir: string } | null>(null);
 
-const downloadDirLabel = computed(() => settingsState.download.musicDir || "未设置");
+const downloadDirLabel = computed(() => pathConfig.value?.musicDir || "未设置");
 const reservedPaths = new Set<string>();
 const selectedSongs = computed(() =>
   songs.value.filter((item) => checkedRowKeys.value.includes(item.id))
@@ -121,7 +123,7 @@ async function downloadOne(song: NavidromeSong, targetPath: string) {
     const context = buildNavidromeContext(authState, settingsState);
 
     let buffer: Uint8Array | null = null;
-    const cacheDir = settingsState.download.cacheDir?.trim();
+    const cacheDir = pathConfig.value?.cacheDir?.trim();
     if (cacheDir) {
       try {
         const cachePath = await join(cacheDir, `${song.id}.mp3`);
@@ -213,7 +215,11 @@ async function filterDownloadTargets(list: NavidromeSong[]) {
         }
       }
 
-      const targetPath = await resolveSongTargetPath(song, settingsState.download, {
+      const downloadSettings = {
+        ...settingsState.download,
+        musicDir: pathConfig.value?.musicDir || "",
+      };
+      const targetPath = await resolveSongTargetPath(song, downloadSettings, {
         occupied: reservedPaths,
         ensureDir: true,
       });
@@ -276,7 +282,24 @@ function exitPage() {
   router.push({ name: "my-music" });
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 提前声明 unregister 变量
+  let unregister: () => void;
+
+  // 注册配置变化监听器（同步执行）
+  unregister = pathConfigManager.onChange(() => {
+    pathConfig.value = pathConfigManager.getConfig();
+  });
+
+  // 在组件卸载时取消监听（同步执行）
+  onUnmounted(() => {
+    unregister();
+  });
+
+  // 初始化路径配置（异步执行）
+  await pathConfigManager.initialize();
+  pathConfig.value = pathConfigManager.getConfig();
+
   loadSongs();
   downloadStore.refreshDownloads().then(() => {
     downloadStore.state.downloads.forEach((item) => {
@@ -287,7 +310,11 @@ onMounted(() => {
   });
 });
 
-onActivated(() => {
+onActivated(async () => {
+  // 每次激活时重新读取路径配置
+  await pathConfigManager.initialize();
+  pathConfig.value = pathConfigManager.getConfig();
+
   loadSongs();
   downloadStore.refreshDownloads().then(() => {
     downloadStore.state.downloads.forEach((item) => {

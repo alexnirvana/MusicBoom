@@ -348,21 +348,8 @@ pub async fn clear_directory(path: String) -> Result<String, String> {
 }
 
 /// 清除数据库中已下载歌曲的记录（local_music 和 downloads 表）
+/// 已废弃：此功能现在由前端通过 tauri-plugin-sql 直接实现
 #[tauri::command]
-pub async fn clear_downloaded_songs(db_path: String) -> Result<String, String> {
-    // 连接数据库
-    let pool = sqlx::SqlitePool::connect(&format!("sqlite:{}", db_path))
-        .await
-        .map_err(|e| format!("连接数据库失败: {}", e))?;
-
-    // 清除 downloads 表
-    sqlx::query("DELETE FROM downloads")
-        .execute(&pool)
-        .await
-        .map_err(|e| format!("清除下载记录失败: {}", e))?;
-
-    // 关闭连接池
-    pool.close().await;
-
-    Ok("已成功清除已下载歌曲的数据库记录".to_string())
+pub async fn clear_downloaded_songs() -> Result<String, String> {
+    Ok("此功能已迁移到前端实现".to_string())
 }

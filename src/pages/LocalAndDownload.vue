@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { exists, readFile, remove, stat, writeFile } from "@tauri-apps/plugin-fs";
 import { join } from "@tauri-apps/api/path";
-import { computed, h, onActivated, onMounted, ref } from "vue";
+import { computed, h, onActivated, onMounted, onUnmounted, ref } from "vue";
 import { NButton, useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useDownloadStore, type DownloadTab } from "../stores/download";
@@ -10,6 +10,7 @@ import { useSettingsStore } from "../stores/settings";
 import { buildNavidromeContext } from "../utils/navidrome-context";
 import { resolveSongTargetPath } from "../utils/download-path";
 import { buildStreamUrl, getSongById } from "../api/navidrome";
+import { pathConfigManager } from "../services/path-config";
 
 const {
   state,
@@ -39,6 +40,7 @@ const selectedDownloadedIds = ref<string[]>([]);
 const selectedDownloadingIds = ref<string[]>([]);
 const reservedDownloadPaths = new Set<string>();
 const resumedSongIds = new Set<string>();
+const pathConfig = ref<{ musicDir: string; cacheDir: string } | null>(null);
 
 // 标签配置，用于实现更现代的视觉展示
 const tabItems = computed(() => [
@@ -69,7 +71,24 @@ function formatSize(bytes?: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 提前声明 unregister 变量
+  let unregister: () => void;
+
+  // 注册配置变化监听器（同步执行）
+  unregister = pathConfigManager.onChange(() => {
+    pathConfig.value = pathConfigManager.getConfig();
+  });
+
+  // 在组件卸载时取消监听（同步执行）
+  onUnmounted(() => {
+    unregister();
+  });
+
+  // 初始化路径配置（异步执行）
+  await pathConfigManager.initialize();
+  pathConfig.value = pathConfigManager.getConfig();
+
   refreshLocalSongs();
   refreshDownloads().then(() => {
     state.downloads.forEach((item) => {
@@ -81,7 +100,11 @@ onMounted(() => {
   activeTab.value = consumePreferredTab("local");
 });
 
-onActivated(() => {
+onActivated(async () => {
+  // 每次激活时重新读取路径配置
+  await pathConfigManager.initialize();
+  pathConfig.value = pathConfigManager.getConfig();
+
   refreshLocalSongs();
   refreshDownloads().then(() => {
     state.downloads.forEach((item) => {
@@ -224,9 +247,13 @@ async function handleResumeDownloads() {
     for (const item of interrupted) {
       try {
         const song = await getSongById({ ...context, songId: item.songId });
+        const downloadSettings = {
+          ...settingsState.download,
+          musicDir: pathConfig.value?.musicDir || "",
+        };
         const targetPath =
           item.filePath ||
-          (await resolveSongTargetPath(song, settingsState.download, {
+          (await resolveSongTargetPath(song, downloadSettings, {
             ensureDir: true,
             occupied: reservedDownloadPaths,
           }));
@@ -238,7 +265,7 @@ async function handleResumeDownloads() {
           song,
           async (signal, plannedPath, updateProgress) => {
             let buffer: Uint8Array | null = null;
-            const cacheDir = settingsState.download.cacheDir?.trim();
+            const cacheDir = pathConfig.value?.cacheDir?.trim();
             if (cacheDir) {
               try {
                 const cachePath = await join(cacheDir, `${song.id}.mp3`);
@@ -371,9 +398,11 @@ const successColumns = [
           <h2 class="m-0 text-xl font-semibold text-white">本地和下载</h2>
           <p class="m-0 text-sm text-[#c6d2e8]">管理本地导入、已下载与下载中歌曲。</p>
         </div>
-        <n-button type="primary" color="#22c55e" :loading="addingLocal" @click="handleAddLocal">
-          新增本地歌曲
-        </n-button>
+        <div class="flex items-center gap-2">
+          <n-button type="primary" color="#22c55e" :loading="addingLocal" @click="handleAddLocal">
+            新增本地歌曲
+          </n-button>
+        </div>
       </div>
 
       <div class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">

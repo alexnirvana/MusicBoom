@@ -1,5 +1,5 @@
 // 本地音乐与下载记录的数据库封装，统一由此文件管理
-import Database from "@tauri-apps/plugin-sql";
+import { mysqlConnectionManager } from "./mysql-connection";
 
 export interface LocalSongRecord {
   id: string;
@@ -24,91 +24,32 @@ export interface DownloadRecord {
   errorMessage?: string | null;
 }
 
-const DB_URL = "sqlite:musicboom.db";
-
-const INIT_SQLS = [
-  `
-    CREATE TABLE IF NOT EXISTS local_music (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      artist TEXT NOT NULL,
-      album TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      path TEXT NOT NULL,
-      created TEXT
-    )
-  `,
-  `
-    CREATE TABLE IF NOT EXISTS downloads (
-      song_id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      album TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      progress INTEGER NOT NULL,
-      file_path TEXT,
-      error_message TEXT
-    )
-  `,
-];
-
-let dbPromise: Promise<Awaited<ReturnType<typeof Database.load>>> | null = null;
-
-async function getDb() {
-  if (!dbPromise) {
-    dbPromise = Database.load(DB_URL).then(async (db) => {
-      for (const sql of INIT_SQLS) {
-        await db.execute(sql);
-      }
-      await migrateDatabase(db);
-      return db;
-    });
-  }
-  return dbPromise;
-}
-
-// 检查并迁移数据库结构，为现有表添加 created 列
-async function migrateDatabase(db: Awaited<ReturnType<typeof Database.load>>) {
-  try {
-    const tablesToMigrate = ['local_music', 'downloads'];
-    for (const tableName of tablesToMigrate) {
-      const tables = await db.select<{ name: string }[]>(`SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}'`);
-      if (tables.length === 0) {
-        continue;
-      }
-
-      const columns = await db.select<{ name: string }[]>(`PRAGMA table_info(${tableName})`);
-      const hasCreatedColumn = columns.some(col => col.name === 'created');
-      if (!hasCreatedColumn) {
-        await db.execute(`ALTER TABLE ${tableName} ADD COLUMN created TEXT`);
-      }
-    }
-  } catch (error) {
-    console.error('数据库迁移失败:', error);
-  }
-}
-
 export async function upsertLocalSong(record: LocalSongRecord) {
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
   await db.execute(
-    `REPLACE INTO local_music (id, title, artist, album, size, path, created) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO local_music (id, title, artist, album, size, path, created) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE title=VALUES(title), artist=VALUES(artist), album=VALUES(album), size=VALUES(size), path=VALUES(path), created=VALUES(created)`,
     [record.id, record.title, record.artist, record.album, record.size, record.path, record.created || null]
   );
 }
 
 export async function listLocalSongs(): Promise<LocalSongRecord[]> {
-  const db = await getDb();
-  const rows = await db.select<LocalSongRecord[]>(
-    `SELECT id, title, artist, album, size, path, created FROM local_music ORDER BY title COLLATE NOCASE`
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return [];
+  const rows = await db.select(
+    `SELECT id, title, artist, album, size, path, created FROM local_music ORDER BY title COLLATE utf8mb4_unicode_ci`
   );
-  return rows;
+  return rows as unknown as LocalSongRecord[];
 }
 
 export async function upsertDownloadRecord(record: DownloadRecord) {
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
   await db.execute(
-    `REPLACE INTO downloads (song_id, title, album, size, status, progress, file_path, error_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO downloads (song_id, title, album, size, status, progress, file_path, error_message)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE title=VALUES(title), album=VALUES(album), size=VALUES(size), status=VALUES(status), progress=VALUES(progress), file_path=VALUES(file_path), error_message=VALUES(error_message)`,
     [
       record.songId,
       record.title,
@@ -123,37 +64,41 @@ export async function upsertDownloadRecord(record: DownloadRecord) {
 }
 
 export async function listDownloadRecords(status?: DownloadStatus): Promise<DownloadRecord[]> {
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return [];
+
   if (status) {
-    const rows = await db.select<DownloadRecord[]>(
-      `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads WHERE status = ? ORDER BY title COLLATE NOCASE`,
+    const rows = await db.select(
+      `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads WHERE status = ? ORDER BY title COLLATE utf8mb4_unicode_ci`,
       [status]
     );
-    return rows;
+    return rows as unknown as DownloadRecord[];
   }
 
-  const rows = await db.select<DownloadRecord[]>(
-    `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads ORDER BY title COLLATE NOCASE`
+  const rows = await db.select(
+    `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads ORDER BY title COLLATE utf8mb4_unicode_ci`
   );
-  return rows;
+  return rows as unknown as DownloadRecord[];
 }
 
 export async function removeDownloadRecord(songId: string) {
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
   await db.execute(`DELETE FROM downloads WHERE song_id = ?`, [songId]);
 }
 
 export async function removeDownloadRecords(songIds: string[]) {
   if (!songIds.length) return;
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
   const placeholders = songIds.map(() => "?").join(", ");
   await db.execute(`DELETE FROM downloads WHERE song_id IN (${placeholders})`, songIds);
 }
 
 export async function removeLocalSongs(ids: string[]) {
   if (!ids.length) return;
-  const db = await getDb();
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
   const placeholders = ids.map(() => "?").join(", ");
   await db.execute(`DELETE FROM local_music WHERE id IN (${placeholders})`, ids);
 }
-
