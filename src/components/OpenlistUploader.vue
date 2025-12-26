@@ -6,6 +6,8 @@ import { useSettingsStore } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import { insertUploadRecord } from "../services/upload-records/db";
+import { open } from '@tauri-apps/plugin-dialog';
+import { readFile } from '@tauri-apps/plugin-fs';
 
 interface TagProcessResult {
   success: boolean;
@@ -26,6 +28,7 @@ interface UploadItem {
   message?: string;
   anchorId?: string | null;
   originalFile?: File; // 保存原始文件引用，用于标签处理
+  filePath?: string | null; // 原始文件完整路径
 }
 
 const props = defineProps<{ baseUrl?: string; token?: string; activeDir: string }>();
@@ -35,7 +38,6 @@ const message = useMessage();
 const settingsStore = useSettingsStore();
 const uploaderHover = ref(false);
 const uploadQueue = ref<UploadItem[]>([]);
-const fileInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const processingCount = ref(0);
 const totalProcessingCount = ref(0);
@@ -47,9 +49,53 @@ const pendingCount = computed(() => uploadQueue.value.filter((item) => item.stat
 const uploadingCount = computed(() => uploadQueue.value.filter((item) => item.status === "uploading").length);
 const totalCount = computed(() => pendingCount.value + uploadingCount.value);
 
-// 触发原生文件选择框
-const triggerFileInput = () => {
-  fileInputRef.value?.click();
+// 触发 Tauri 文件选择器
+const triggerFileInput = async () => {
+  try {
+    const selected = await open({
+      multiple: true,
+      filters: [
+        {
+          name: 'Audio Files',
+          extensions: ['flac', 'mp3', 'wav', 'ogg', 'm4a', 'aac']
+        },
+        {
+          name: 'All Files',
+          extensions: ['*']
+        }
+      ],
+    });
+
+    if (selected && Array.isArray(selected)) {
+      // 使用 Tauri 文件选择器选择文件，可以获取完整路径
+      const filePaths = selected as string[];
+      const files: File[] = [];
+
+      for (const filePath of filePaths) {
+        try {
+          // 读取文件数据 (默认返回 Uint8Array，即二进制)
+          const fileData = await readFile(filePath);
+          const fileName = filePath.split(/[/\\]/).pop() || 'unknown';
+
+          // 创建 File 对象
+          const file = new File([fileData], fileName, {
+            type: 'audio/mpeg',
+          });
+
+          files.push(file);
+        } catch (error) {
+          console.error(`读取文件失败: ${filePath}`, error);
+          message.error(`读取文件失败: ${filePath}`);
+        }
+      }
+
+      if (files.length > 0) {
+        handleFiles(files, filePaths);
+      }
+    }
+  } catch (error) {
+    console.error('文件选择失败:', error);
+  }
 };
 
 // 将字节数格式化为易读文本
@@ -76,10 +122,10 @@ const isAudioFile = (file: File): boolean => {
 };
 
 // 为音频文件添加APP_ANCHOR_ID标签
-const addAppAnchorTag = async (file: File): Promise<{ file: File; anchorId: string | null }> => {
+const addAppAnchorTag = async (file: File, filePath: string | null): Promise<{ file: File; anchorId: string | null }> => {
   // 检查设置中的标签配置
   const tagSettings = settingsStore.state.download.tags;
-  
+
   // 如果没有启用任何标签类型，则跳过处理
   if (!tagSettings.enableApev2 && !tagSettings.enableId3v1 && !tagSettings.enableId3v2) {
     return { file, anchorId: null };
@@ -91,33 +137,57 @@ const addAppAnchorTag = async (file: File): Promise<{ file: File; anchorId: stri
   }
 
   try {
-    // 将文件转换为字节数组
-    const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    
-    // 调用Tauri命令添加标签
-    const result = await invoke("add_app_anchor_tag", {
-      fileName: file.name,
-      fileData: Array.from(uint8Array), // 将Uint8Array转换为普通数组以便序列化
-      appAnchorId: null, // 让Rust端自动生成ID
-    }) as TagProcessResult;
+    // 如果有文件路径，直接修改原始文件
+    if (filePath) {
+      const result = await invoke("add_app_anchor_tag_to_file", {
+        filePath: filePath,
+        appAnchorId: null, // 让Rust端自动生成ID
+      }) as TagProcessResult;
 
-    if (result.success && result.app_anchor_id && result.modified_data) {
-      // 使用Rust端返回的修改后的文件数据创建新的File对象
-      const modifiedUint8Array = new Uint8Array(result.modified_data);
-      const modifiedBlob = new Blob([modifiedUint8Array], { type: file.type });
-      const modifiedFile = new File([modifiedBlob], file.name, { 
-        type: file.type,
-        lastModified: Date.now()
-      });
-      
-      console.log(`[Tag] 成功为文件 ${file.name} 添加标签 APP_ANCHOR_ID:${result.app_anchor_id}`);
-      return { file: modifiedFile, anchorId: result.app_anchor_id };
-    } else {
-      if (result.error_message) {
-        message.warning(`处理音频标签时遇到问题: ${result.error_message}`);
+      if (result.success && result.app_anchor_id && result.modified_data) {
+        // 读取修改后的文件
+        const modifiedUint8Array = new Uint8Array(result.modified_data);
+        const modifiedBlob = new Blob([modifiedUint8Array], { type: file.type });
+        const modifiedFile = new File([modifiedBlob], file.name, {
+          type: file.type,
+          lastModified: Date.now()
+        });
+
+        console.log(`[Tag] 成功修改原始文件 ${file.name} 并添加标签 APP_ANCHOR_ID:${result.app_anchor_id}`);
+        return { file: modifiedFile, anchorId: result.app_anchor_id };
+      } else {
+        if (result.error_message) {
+          message.warning(`处理音频标签时遇到问题: ${result.error_message}`);
+        }
+        return { file, anchorId: null };
       }
-      return { file, anchorId: null };
+    } else {
+      // 如果没有文件路径（例如通过拖拽上传），使用旧方式在内存中处理
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      const result = await invoke("add_app_anchor_tag", {
+        fileName: file.name,
+        fileData: Array.from(uint8Array),
+        appAnchorId: null,
+      }) as TagProcessResult;
+
+      if (result.success && result.app_anchor_id && result.modified_data) {
+        const modifiedUint8Array = new Uint8Array(result.modified_data);
+        const modifiedBlob = new Blob([modifiedUint8Array], { type: file.type });
+        const modifiedFile = new File([modifiedBlob], file.name, {
+          type: file.type,
+          lastModified: Date.now()
+        });
+
+        console.log(`[Tag] 成功为文件 ${file.name} 添加标签 APP_ANCHOR_ID:${result.app_anchor_id}`);
+        return { file: modifiedFile, anchorId: result.app_anchor_id };
+      } else {
+        if (result.error_message) {
+          message.warning(`处理音频标签时遇到问题: ${result.error_message}`);
+        }
+        return { file, anchorId: null };
+      }
     }
   } catch (error) {
     console.error("添加APP_ANCHOR_ID标签时出错:", error);
@@ -127,7 +197,7 @@ const addAppAnchorTag = async (file: File): Promise<{ file: File; anchorId: stri
 };
 
 // 统一处理文件列表入口
-const handleFiles = async (files: File[]) => {
+const handleFiles = async (files: File[], filePaths: string[] = []) => {
   if (!files.length) return;
 
   if (!props.baseUrl || !props.token) {
@@ -146,7 +216,7 @@ const handleFiles = async (files: File[]) => {
   totalProcessingCount.value = files.length;
 
   // 生成文件 ID 和任务的映射
-  const fileTasks = files.map((file) => ({
+  const fileTasks = files.map((file, index) => ({
     id: `${Date.now()}-${file.name}-${Math.random().toString(16).slice(2)}`,
     name: file.name,
     size: file.size,
@@ -157,6 +227,7 @@ const handleFiles = async (files: File[]) => {
     targetDir: currentDir.value,
     anchorId: null as string | null,
     originalFile: file,
+    filePath: filePaths[index] || null, // 原始文件路径（如果有）
   }));
 
   // 新文件添加到队列末尾
@@ -169,7 +240,7 @@ const handleFiles = async (files: File[]) => {
     processingCount.value = i + 1;
 
     try {
-      const { file: processedFile, anchorId } = await addAppAnchorTag(fileTask.originalFile);
+      const { file: processedFile, anchorId } = await addAppAnchorTag(fileTask.originalFile, fileTask.filePath);
       // 通过 ID 找到任务并更新
       const task = uploadQueue.value.find((t) => t.id === fileTask.id);
       if (task) {
@@ -209,13 +280,6 @@ const handleDrop = (event: DragEvent) => {
   uploaderHover.value = false;
   const files = Array.from(event.dataTransfer?.files || []);
   handleFiles(files);
-};
-
-const handleFileChange = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  const files = Array.from(target.files || []);
-  handleFiles(files);
-  target.value = "";
 };
 
 // 重试单个失败的任务
@@ -351,14 +415,6 @@ const processQueue = async () => {
         <p class="m-0 text-sm text-[#9ab4d8]">也可以点击上方按钮手动选择</p>
       </div>
     </div>
-
-    <input
-      ref="fileInputRef"
-      type="file"
-      multiple
-      class="hidden"
-      @change="handleFileChange"
-    />
 
     <!-- 显示正在处理标签的进度 -->
     <div v-if="processingCount > 0" class="mt-4 rounded-xl border border-blue-400/30 bg-blue-500/10 px-4 py-3">

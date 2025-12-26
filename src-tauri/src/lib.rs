@@ -35,6 +35,7 @@ pub fn run() {
             cache_fetch,
             cache_refresh,
             add_app_anchor_tag,
+            add_app_anchor_tag_to_file,
             clear_directory,
             clear_downloaded_songs
         ])

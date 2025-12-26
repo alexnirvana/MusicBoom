@@ -319,6 +319,99 @@ fn add_tag_to_file(file_data: &[u8], anchor_id: &str, format: &str) -> Result<Ve
     Ok(modified_data)
 }
 
+/// 直接修改原始文件并添加标签
+#[tauri::command]
+pub async fn add_app_anchor_tag_to_file(
+    file_path: String,
+    app_anchor_id: Option<String>,
+) -> Result<TagProcessResult, String> {
+    // 如果没有提供app_anchor_id，则生成一个新的
+    let anchor_id = app_anchor_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    // 检查文件是否存在
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Ok(TagProcessResult {
+            success: false,
+            error_message: Some(format!("文件不存在: {}", file_path)),
+            app_anchor_id: Some(anchor_id),
+            modified_data: None,
+        });
+    }
+
+    // 从文件名检查扩展名
+    let extension = path.extension().and_then(|ext| ext.to_str());
+
+    match extension {
+        Some("flac") | Some("mp3") | Some("m4a") | Some("ogg") => {
+            // 处理支持的音频格式 - 直接修改原始文件
+            use audiotags::Tag;
+
+            // 读取并修改标签
+            let mut tag = match Tag::new().read_from_path(path) {
+                Ok(t) => t,
+                Err(e) => {
+                    return Ok(TagProcessResult {
+                        success: false,
+                        error_message: Some(format!("读取音频标签失败: {}", e)),
+                        app_anchor_id: Some(anchor_id),
+                        modified_data: None,
+                    });
+                }
+            };
+
+            // 设置评论字段为APP_ANCHOR_ID
+            let comment_with_anchor = format!("APP_ANCHOR_ID:{}", anchor_id);
+            tag.set_comment(comment_with_anchor);
+
+            // 写回标签到原始文件
+            if let Err(e) = tag.write_to_path(path.to_str().unwrap_or("")) {
+                return Ok(TagProcessResult {
+                    success: false,
+                    error_message: Some(format!("写入音频标签失败: {}", e)),
+                    app_anchor_id: Some(anchor_id),
+                    modified_data: None,
+                });
+            }
+
+            // 读取修改后的文件数据
+            let modified_data = match std::fs::read(path) {
+                Ok(data) => data,
+                Err(e) => {
+                    return Ok(TagProcessResult {
+                        success: false,
+                        error_message: Some(format!("读取修改后的文件失败: {}", e)),
+                        app_anchor_id: Some(anchor_id),
+                        modified_data: None,
+                    });
+                }
+            };
+
+            Ok(TagProcessResult {
+                success: true,
+                error_message: None,
+                app_anchor_id: Some(anchor_id),
+                modified_data: Some(modified_data),
+            })
+        }
+        Some("wav") | Some("aac") => Ok(TagProcessResult {
+            success: false,
+            error_message: Some(format!(
+                "{}格式暂不支持标签写入，请转换为FLAC/MP3/M4A/OGG格式",
+                extension.unwrap()
+            )),
+            app_anchor_id: Some(anchor_id),
+            modified_data: None,
+        }),
+        _ => Ok(TagProcessResult {
+            success: false,
+            error_message: Some("不支持的音频格式，目前支持FLAC、MP3、M4A、OGG".to_string()),
+            app_anchor_id: Some(anchor_id),
+            modified_data: None,
+        }),
+    }
+}
+
 /// 清除指定目录下所有文件和文件夹
 #[tauri::command]
 pub async fn clear_directory(path: String) -> Result<String, String> {
