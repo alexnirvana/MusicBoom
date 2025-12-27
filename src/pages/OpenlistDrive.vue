@@ -564,7 +564,8 @@ onActivated(async () => {
       :style="{ maxWidth: '780px' }"
       content-style="padding: 0"
       :on-after-leave="closeUploaderDialog"
-      @close="closeUploaderDialog"
+      :mask-closable="false"
+      :close-on-esc="false"
     >
       <OpenlistUploader
         :base-url="state.baseUrl || ''"

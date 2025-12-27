@@ -383,14 +383,8 @@ const processQueue = async () => {
 </script>
 
 <template>
-  <div
-    class=" border border-white/10 bg-[#0f1320]/70 p-4 text-white"
-    :class="uploaderHover ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-[#0f1320]' : ''"
-    @dragover.prevent="handleDragOver"
-    @dragleave.prevent="handleDragLeave"
-    @drop.prevent="handleDrop"
-  >
-    <div class="flex flex-wrap items-center justify-between gap-3">
+  <div class="border border-white/10 bg-[#0f1320]/70 p-4 text-white">
+    <div class="flex items-center justify-between mb-4">
       <div>
         <p class="m-0 text-sm text-[#9ab4d8]">当前上传目录</p>
         <p class="m-0 text-lg font-semibold">{{ currentDir }}</p>
@@ -408,6 +402,9 @@ const processQueue = async () => {
     <div
       class="mt-3 flex min-h-[140px] cursor-pointer items-center justify-center  border border-dashed border-white/20 bg-white/5 px-4 text-center"
       :class="uploaderHover ? 'border-blue-400/70 bg-blue-400/10' : ''"
+      @dragover.prevent="handleDragOver"
+      @dragleave.prevent="handleDragLeave"
+      @drop.prevent="handleDrop"
       @click="triggerFileInput"
     >
       <div>
