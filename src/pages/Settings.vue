@@ -8,9 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useMessage, useDialog } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { useAuthStore } from "../stores/auth";
-import {
-  useSettingsStore,
-} from "../stores/settings";
+import { useSettingsStore } from "../stores/settings";
 import type {
   DownloadSettings,
   GeneralSettings,
@@ -20,6 +18,7 @@ import type {
 } from "../types/settings";
 import type { Ref } from "vue";
 import { pathConfigManager } from "../services/path-config";
+import { openlistConfigManager } from "../services/openlist-config";
 
 // 消息提示实例
 const message = useMessage();
@@ -29,7 +28,7 @@ const dialog = useDialog();
 const { state: authState } = useAuthStore();
 
 // 设置存储
-const { state: settingsState, ready, updateOpenlist, updateDownload, updateGeneral, updatePlayback } =
+const { state: settingsState, ready, updateDownload, updateGeneral, updatePlayback } =
   useSettingsStore();
 
 // Navidrome 连接配置表单
@@ -209,7 +208,40 @@ async function syncFormFromStore() {
     tags: { ...settingsState.download.tags },
   });
 
-  Object.assign(openlistForm, { ...settingsState.openlist });
+  // 读取 OpenList 配置文件，失败时回退到数据库设置
+  let openlistHydrated = false;
+  try {
+    await openlistConfigManager.initialize();
+    const openlistConfig = openlistConfigManager.getConfig();
+    if (openlistConfig) {
+      Object.assign(openlistForm, openlistConfig);
+      Object.assign(settingsState.openlist, openlistConfig);
+      openlistHydrated = Boolean(
+        (openlistConfig.baseUrl && openlistConfig.baseUrl.trim() !== "http://") ||
+          openlistConfig.username ||
+          openlistConfig.password ||
+          openlistConfig.remember
+      );
+    }
+  } catch (error) {
+    console.warn("读取 OpenList 配置失败", error);
+  }
+
+  if (!openlistHydrated) {
+    Object.assign(openlistForm, { ...settingsState.openlist });
+    const hasStoredValue =
+      (openlistForm.baseUrl && openlistForm.baseUrl.trim() !== "http://") ||
+      openlistForm.username ||
+      openlistForm.password ||
+      openlistForm.remember;
+    if (hasStoredValue) {
+      try {
+        await openlistConfigManager.saveConfig({ ...openlistForm });
+      } catch (error) {
+        console.warn("回写 OpenList 配置失败", error);
+      }
+    }
+  }
   Object.assign(generalForm, { ...settingsState.general });
   Object.assign(playbackForm, { ...settingsState.playback });
 }
@@ -305,7 +337,9 @@ async function handleSaveNavidrome() {
 async function handleSaveOpenlist() {
   savingOpenlist.value = true;
   try {
-    await updateOpenlist({ ...openlistForm });
+    await openlistConfigManager.initialize();
+    await openlistConfigManager.saveConfig({ ...openlistForm });
+    Object.assign(settingsState.openlist, { ...openlistForm });
     message.success("OpenList 配置已保存");
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
