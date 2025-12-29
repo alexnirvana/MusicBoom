@@ -11,6 +11,7 @@ import OpenlistLogin from "../pages/OpenlistLogin.vue";
 import PlaylistView from "../pages/PlaylistView.vue";
 import RecentPlays from "../pages/RecentPlays.vue";
 import MostPlayed from "../pages/MostPlayed.vue";
+import RatingRank from "../pages/RatingRank.vue";
 import { useAuthStore } from "../stores/auth";
 import { useOpenlistStore } from "../stores/openlist";
 
@@ -39,6 +40,7 @@ const routes = [
   { path: "/openlist/login", name: "openlist-login", component: OpenlistLogin },
   { path: "/openlist", name: "openlist-drive", component: OpenlistDrive },
   { path: "/settings", name: "settings", component: Settings, meta: { requiresAuth: true } },
+  { path: "/rank", name: "rating-rank", component: RatingRank, meta: { requiresAuth: true } },
 ];
 
 const router = createRouter({

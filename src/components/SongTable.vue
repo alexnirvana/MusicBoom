@@ -6,6 +6,7 @@ import {
   NDropdown,
   NIcon,
   NInput,
+  NRate,
   NTag,
   NSpin,
   NTooltip,
@@ -16,12 +17,13 @@ import {
   type DropdownGroupOption,
   useMessage,
 } from "naive-ui";
-import { computed, h, nextTick, ref, type Component, type PropType } from "vue";
+import { computed, h, nextTick, onMounted, reactive, ref, type Component, type PropType } from "vue";
 import type { NavidromeSong } from "../types/navidrome";
 import { usePlaylistsStore } from "../stores/playlists";
 import { useFavoriteStore } from "../stores/favorites";
 import type { DownloadStatus } from "../utils/download-status";
 import type { AnchorStatus } from "../utils/anchor-status";
+import { listRatingValues, setSongRating } from "../services/ratings";
 
 // 定义组件入参，方便在不同页面复用同一套表格渲染与筛选逻辑
 const props = defineProps({
@@ -102,6 +104,60 @@ function renderIcon(icon: Component, color = "#9ab4d8") {
   return () => h(NIcon, { size: 18, color }, { default: () => h(icon) });
 }
 
+// 评分记录，使用对象方便按歌曲 ID 读取
+const ratings = reactive<Record<string, number>>({});
+
+// 读取数据库中的评分映射
+async function loadRatings() {
+  try {
+    const rows = await listRatingValues();
+    for (const key of Object.keys(ratings)) {
+      delete ratings[key];
+    }
+    rows.forEach((item) => {
+      ratings[item.songId] = item.rating;
+    });
+  } catch (error) {
+    const hint = error instanceof Error ? error.message : String(error);
+    message.warning(`加载评分失败：${hint}`);
+  }
+}
+
+// 统一计算行的展示评分
+function resolveRating(row: NavidromeSong) {
+  return ratings[row.id] ?? row.rating ?? 0;
+}
+
+// 写入评分并更新行数据
+async function handleRatingChange(row: NavidromeSong, value: number | null) {
+  const next = value ?? 0;
+  const previous = resolveRating(row);
+  if (next === previous) return;
+
+  if (next > 0) {
+    ratings[row.id] = next;
+    row.rating = next;
+  } else {
+    delete ratings[row.id];
+    row.rating = undefined;
+  }
+
+  try {
+    await setSongRating(row, next);
+    message.success(next > 0 ? `已为该歌曲打 ${next} 星` : "已清除该歌曲评分");
+  } catch (error) {
+    if (previous > 0) {
+      ratings[row.id] = previous;
+      row.rating = previous;
+    } else {
+      delete ratings[row.id];
+      row.rating = undefined;
+    }
+    const hint = error instanceof Error ? error.message : String(error);
+    message.error(`保存评分失败：${hint}`);
+  }
+}
+
 // 表格列配置，收藏按钮与播放行为均通过事件向外暴露
 const columns = computed<DataTableColumns<NavidromeSong>>(() => [
   {
@@ -160,6 +216,19 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     width: 100, 
     sorter: (row1, row2) => row1.duration - row2.duration,
     render: (row) => formatDuration(row.duration) 
+  },
+  {
+    title: "评分",
+    key: "rating",
+    width: 180,
+    sorter: (row1, row2) => resolveRating(row1) - resolveRating(row2),
+    render: (row) =>
+      h(NRate, {
+        size: "small",
+        allowClear: true,
+        value: resolveRating(row),
+        "onUpdate:value": (val: number | null) => handleRatingChange(row, val),
+      }),
   },
   ...(props.showPlayCount
     ? [{
@@ -380,6 +449,10 @@ function locateRow(rowId: string) {
     }
   });
 }
+
+onMounted(() => {
+  void loadRatings();
+});
 
 defineExpose({ locateRow });
 </script>

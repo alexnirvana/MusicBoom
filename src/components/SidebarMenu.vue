@@ -87,6 +87,7 @@ const routeMap: Record<string, { name: string }> = {
   local: { name: "local-download" },
   most: { name: "most-played" },
   recent: { name: "recent-plays" },
+  rank: { name: "rating-rank" },
   openlist: { name: "openlist-drive" },
 };
 
