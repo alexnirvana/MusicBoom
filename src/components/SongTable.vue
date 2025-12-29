@@ -161,11 +161,12 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     key: "created",
     minWidth: 180,
     ellipsis: true,
+    // 默认期望按创建时间倒序展示，新歌靠前
     sorter: (row1, row2) => {
       if (!row1.created && !row2.created) return 0;
       if (!row1.created) return 1;
       if (!row2.created) return -1;
-      return new Date(row1.created).getTime() - new Date(row2.created).getTime();
+      return new Date(row2.created).getTime() - new Date(row1.created).getTime();
     },
     render: (row) => formatCreatedTime(row.created),
   },
@@ -419,6 +420,7 @@ defineExpose({ locateRow });
           :bordered="false"
           :columns="columns"
           :data="filteredSongs"
+          :default-sort="{ columnKey: 'created', order: 'descend' }"
           :loading="loading"
           :pagination="false"
           :row-key="(row: NavidromeSong) => row.id"
@@ -443,4 +445,3 @@ defineExpose({ locateRow });
     </n-card>
   </div>
 </template>
-

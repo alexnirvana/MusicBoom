@@ -49,7 +49,14 @@ async function loadSongs() {
   try {
     await settingsReady;
     const context = resolveNavidromeContext();
-    songs.value = await getSongs(context);
+    const list = await getSongs(context);
+    // 默认按创建时间倒序排列，新导入的歌曲优先展示
+    songs.value = [...list].sort((a, b) => {
+      if (!a.created && !b.created) return 0;
+      if (!a.created) return 1;
+      if (!b.created) return -1;
+      return new Date(b.created).getTime() - new Date(a.created).getTime();
+    });
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
     message.error(`获取歌曲列表失败：${fallback}`);
