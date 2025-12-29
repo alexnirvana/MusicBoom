@@ -19,8 +19,8 @@ use windows::{
                 DWMWA_HAS_ICONIC_BITMAP,
             },
             Gdi::{
-                CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPV5HEADER,
-                BI_BITFIELDS, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
+                CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER,
+                RGBQUAD, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
             },
         },
         System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER},
@@ -270,8 +270,17 @@ fn build_placeholder_thumbnail() -> DynamicImage {
 }
 
 fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HBITMAP, HRESULT> {
-    println!("创建 BITMAPV5HEADER 结构...");
-    let expected_size = (width * height * 4) as usize;
+    println!("创建 BITMAPINFOHEADER 结构...");
+
+    if width <= 0 || height <= 0 {
+        println!("位图尺寸非法: {}x{}", width, height);
+        return Err(HRESULT(0x80070057u32 as i32));
+    }
+
+    let height_abs = height.unsigned_abs();
+    let row_bytes = width as usize * 4;
+    let expected_size = row_bytes * height_abs as usize;
+
     if pixels.len() != expected_size {
         println!(
             "像素数据大小不匹配，期望: {} bytes，实际: {} bytes",
@@ -281,18 +290,14 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
         return Err(HRESULT(0x80070057u32 as i32));
     }
 
-    let mut header = BITMAPV5HEADER::default();
-    header.bV5Size = size_of::<BITMAPV5HEADER>() as u32;
-    header.bV5Width = width;
-    header.bV5Height = -height;
-    header.bV5Planes = 1;
-    header.bV5BitCount = 32;
-    header.bV5Compression = BI_BITFIELDS.0;
-    header.bV5RedMask = 0x00ff0000;
-    header.bV5GreenMask = 0x0000ff00;
-    header.bV5BlueMask = 0x000000ff;
-    header.bV5AlphaMask = 0xff000000;
-    header.bV5SizeImage = expected_size as u32;
+    let mut header = BITMAPINFOHEADER::default();
+    header.biSize = size_of::<BITMAPINFOHEADER>() as u32;
+    header.biWidth = width;
+    header.biHeight = -(height_abs as i32);
+    header.biPlanes = 1;
+    header.biBitCount = 32;
+    header.biCompression = BI_RGB.0;
+    header.biSizeImage = expected_size as u32;
 
     println!(
         "创建 DIB Section，尺寸: {}x{}，数据大小: {} bytes",
@@ -301,9 +306,11 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
         pixels.len()
     );
     let mut bits: *mut c_void = null_mut();
-    let info_ptr: &BITMAPINFO =
-        unsafe { &*((&header as *const BITMAPV5HEADER).cast::<BITMAPINFO>()) };
-    let hbitmap = unsafe { CreateDIBSection(None, info_ptr, DIB_RGB_COLORS, &mut bits, None, 0) };
+    let info = BITMAPINFO {
+        bmiHeader: header,
+        bmiColors: [RGBQUAD::default(); 1],
+    };
+    let hbitmap = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) };
 
     match hbitmap {
         Ok(bitmap) => {
