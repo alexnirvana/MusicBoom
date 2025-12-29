@@ -31,3 +31,10 @@ export interface PlaybackSnapshot {
   volume: number;
   updatedAt: number;
 }
+
+// 写入到本地配置文件的播放器持久化信息
+export interface PlayerPersistedState {
+  mode: PlayMode;
+  volume: number;
+  snapshot: PlaybackSnapshot | null;
+}
