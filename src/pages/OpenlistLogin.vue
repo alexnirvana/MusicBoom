@@ -5,14 +5,13 @@ import MainLayout from "../layouts/MainLayout.vue";
 import { loginOpenlist } from "../api/openlist";
 import type { OpenlistLoginPayload } from "../types/openlist";
 import { useOpenlistStore } from "../stores/openlist";
-import { useSettingsStore } from "../stores/settings";
 import { useRouter } from "../utils/router-lite";
+import { openlistConfigManager } from "../services/openlist-config";
 
 const message = useMessage();
 const router = useRouter();
 const loading = ref(false);
 const remember = ref(false);
-const { state: settingsState, ready: settingsReady, updateOpenlist } = useSettingsStore();
 
 const form = reactive<OpenlistLoginPayload>({
   baseUrl: "http://",
@@ -24,15 +23,17 @@ const { state, ready, setSession, clearSession } = useOpenlistStore();
 
 const isLoggedIn = computed(() => Boolean(state.token));
 
-// 从设置表中恢复 OpenList 登录凭据，方便快速登录
+// 从本地配置文件恢复 OpenList 登录凭据，方便快速登录
 async function hydrateCredential() {
   try {
-    await settingsReady;
-    const saved = settingsState.openlist;
-    form.baseUrl = saved.baseUrl || form.baseUrl;
-    form.username = saved.username || form.username;
-    form.password = saved.password || form.password;
-    remember.value = Boolean(saved.remember);
+    await openlistConfigManager.initialize();
+    const saved = openlistConfigManager.getConfig();
+    if (saved) {
+      form.baseUrl = saved.baseUrl || form.baseUrl;
+      form.username = saved.username || form.username;
+      form.password = saved.password || form.password;
+      remember.value = Boolean(saved.remember);
+    }
   } catch (error) {
     const fallback = error instanceof Error ? error.message : String(error);
     message.warning(`读取网盘登录信息失败：${fallback}`);
@@ -47,9 +48,19 @@ async function handleLogin() {
     await setSession(result);
 
     if (remember.value) {
-      await updateOpenlist({ ...form, remember: true });
+      await openlistConfigManager.saveConfig({
+        baseUrl: result.baseUrl,
+        username: form.username,
+        password: form.password,
+        remember: true,
+      });
     } else {
-      await updateOpenlist({ baseUrl: "", username: "", password: "", remember: false });
+      await openlistConfigManager.saveConfig({
+        baseUrl: "",
+        username: "",
+        password: "",
+        remember: false,
+      });
     }
 
     message.success("网盘登录成功，正在跳转...");
