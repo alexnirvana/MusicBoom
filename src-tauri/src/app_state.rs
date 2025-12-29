@@ -4,8 +4,8 @@ use std::sync::Mutex;
 /// 应用级的共享状态，后续可替换为 SQLite/Store 等持久化方案。
 #[derive(Default)]
 pub struct AppState {
-    pub servers: Mutex<Vec<ServerConfig>>,                    // 服务器配置列表
-    pub queues: Mutex<Vec<QueueTask>>,                      // 上传/下载队列状态
+    pub servers: Mutex<Vec<ServerConfig>>, // 服务器配置列表
+    pub queues: Mutex<Vec<QueueTask>>,     // 上传/下载队列状态
 }
 
 /// Navidrome/OpenList 服务器配置模型。
