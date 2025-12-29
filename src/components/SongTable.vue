@@ -31,6 +31,7 @@ const props = defineProps({
   anchorStatuses: { type: Object as PropType<Map<string, AnchorStatus>>, default: () => new Map() },
   emptyHint: { type: String, default: "暂无歌曲数据，尝试同步或检查连接。" },
   searchPlaceholder: { type: String, default: "搜索标题、歌手或专辑" },
+  createdColumnLabel: { type: String, default: "创建时间" },
 });
 
 const emit = defineEmits<{
@@ -157,7 +158,7 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     render: (row) => formatDuration(row.duration) 
   },
   {
-    title: "创建时间",
+    title: props.createdColumnLabel,
     key: "created",
     minWidth: 180,
     ellipsis: true,

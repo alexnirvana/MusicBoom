@@ -15,6 +15,7 @@ import type { DownloadSettings } from "../types/settings";
 import { playerConfigManager } from "../services/player-config";
 import { readSetting } from "../services/settings-table";
 import { SETTING_KEYS } from "../constants/setting-keys";
+import { recordRecentPlay } from "../services/recent-plays";
 
 const audio = new Audio();
 audio.preload = "metadata";
@@ -266,6 +267,9 @@ async function playCurrent() {
     }
     await audio.play();
     state.isPlaying = true;
+    recordRecentPlay(track).catch((error) => {
+      console.warn("记录最近播放失败", error);
+    });
     await persistSnapshot();
   } catch (error) {
     const hint = error instanceof Error ? error.message : String(error);

@@ -9,6 +9,7 @@ import LocalAndDownload from "../pages/LocalAndDownload.vue";
 import OpenlistDrive from "../pages/OpenlistDrive.vue";
 import OpenlistLogin from "../pages/OpenlistLogin.vue";
 import PlaylistView from "../pages/PlaylistView.vue";
+import RecentPlays from "../pages/RecentPlays.vue";
 import { useAuthStore } from "../stores/auth";
 import { useOpenlistStore } from "../stores/openlist";
 
@@ -30,6 +31,7 @@ const routes = [
     component: LocalAndDownload,
     meta: { requiresAuth: true },
   },
+  { path: "/recent", name: "recent-plays", component: RecentPlays, meta: { requiresAuth: true } },
   { path: "/favorites", name: "favorites", component: FavoriteMusic, meta: { requiresAuth: true } },
   { path: "/playlists", name: "playlists", component: PlaylistView, meta: { requiresAuth: true } },
   { path: "/openlist/login", name: "openlist-login", component: OpenlistLogin },
