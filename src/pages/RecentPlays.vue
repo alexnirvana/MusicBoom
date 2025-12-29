@@ -116,9 +116,6 @@ onUnmounted(() => {
           <h1 class="m-0 text-3xl font-semibold text-white">自动同步最近播放的 500 首歌曲</h1>
           <p class="m-0 text-[#c6d2e8]">重复播放会将歌曲顶置且不重复显示，方便继续收听。</p>
         </div>
-        <div class="flex flex-wrap gap-3">
-          <n-button type="primary" color="#6366f1" :loading="loading" @click="loadRecentSongs">刷新列表</n-button>
-        </div>
       </div>
 
       <SongTable
