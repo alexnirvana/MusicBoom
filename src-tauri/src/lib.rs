@@ -1,5 +1,7 @@
 mod app_state;
 mod commands;
+#[cfg(windows)]
+mod windows;
 
 use app_state::AppState;
 use commands::*;
@@ -18,6 +20,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .manage(AppState::default())
+        .setup(|app| {
+            #[cfg(windows)]
+            {
+                if let Err(error) = crate::windows::taskbar::register_window(app) {
+                    println!("注册 Windows 任务栏扩展失败: {:?}", error);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             add_server,
             list_servers,
@@ -38,7 +49,8 @@ pub fn run() {
             add_app_anchor_tag_to_file,
             clear_directory,
             clear_downloaded_songs,
-            resolve_hostname
+            resolve_hostname,
+            update_windows_thumbnail
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出现异常");

@@ -17,9 +17,14 @@ import { readSetting } from "../services/settings-table";
 import { SETTING_KEYS } from "../constants/setting-keys";
 import { recordRecentPlay } from "../services/recent-plays";
 import { emitRecentPlayUpdated } from "../utils/recent-play-events";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const audio = new Audio();
 audio.preload = "metadata";
+
+// 简单的系统判断，仅在 Windows 下才同步任务栏状态
+const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
 const state = reactive<PlayerState>({
   playlist: [],
@@ -42,6 +47,26 @@ const PLAY_MODES: PlayMode[] = ["shuffle", "order", "single", "list"];
 
 // 随机模式的播放历史，便于返回上一首时精确回退
 const shuffleHistory: number[] = [];
+
+// 缩略工具栏事件监听（Windows 任务栏按钮）
+listen("windows-thumb-button", async (event) => {
+  const action = event.payload as string;
+  if (action === "prev") {
+    await playPrev();
+  } else if (action === "next") {
+    await playNext();
+  } else if (action === "toggle") {
+    await togglePlay();
+  }
+}).catch((error) => {
+  console.warn("监听任务栏按钮事件失败", error);
+});
+
+// 任务栏封面缓存，避免重复编码
+const taskbarCoverCache: { lastTrackId: string | null; coverBase64: string | null } = {
+  lastTrackId: null,
+  coverBase64: null,
+};
 
 // 从本地配置恢复音量与播放模式
 initializePlayerPreferences().catch((error) => {
@@ -135,6 +160,54 @@ function recordShuffleHistory() {
 // 清空随机模式的历史记录
 function resetShuffleHistory() {
   shuffleHistory.length = 0;
+}
+
+// 将封面 URL 下载为 base64，避免任务栏调用跨域受限
+async function fetchCoverBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    bytes.forEach((b) => (binary += String.fromCharCode(b)));
+    return btoa(binary);
+  } catch (error) {
+    console.warn("封面下载失败，任务栏缩略图将使用空图", error);
+    return null;
+  }
+}
+
+// 同步 Windows 任务栏缩略图与缩略工具栏状态
+async function syncWindowsTaskbar() {
+  if (!isWindows) return;
+
+  const track = currentTrack.value;
+  let coverBase64: string | null = null;
+
+  if (track?.coverUrl) {
+    if (taskbarCoverCache.lastTrackId === track.id && taskbarCoverCache.coverBase64) {
+      coverBase64 = taskbarCoverCache.coverBase64;
+    } else {
+      coverBase64 = await fetchCoverBase64(track.coverUrl);
+      taskbarCoverCache.lastTrackId = track.id;
+      taskbarCoverCache.coverBase64 = coverBase64;
+    }
+  } else {
+    taskbarCoverCache.lastTrackId = null;
+    taskbarCoverCache.coverBase64 = null;
+  }
+
+  try {
+    await invoke("update_windows_thumbnail", {
+      payload: {
+        cover_data: coverBase64,
+        is_playing: state.isPlaying,
+        title: track?.title ?? null,
+      },
+    });
+  } catch (error) {
+    console.warn("同步任务栏缩略图失败", error);
+  }
 }
 
 // 计算随机模式下的下一首索引，尽量避免重复当前歌曲
@@ -286,6 +359,7 @@ async function playCurrent() {
     if (sessionId === playSessionId) {
       state.loading = false;
       syncProgress();
+      await syncWindowsTaskbar();
     }
   }
 }
@@ -411,6 +485,7 @@ async function togglePlay() {
   } else {
     audio.pause();
     state.isPlaying = false;
+    await syncWindowsTaskbar();
   }
 }
 
