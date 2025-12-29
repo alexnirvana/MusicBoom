@@ -4,6 +4,7 @@ import type { TreeOption } from "naive-ui";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import { listOpenlistDirectory, removeOpenlistEntries } from "../api/openlist";
+import { OpenlistApiError } from "../api/openlist/utils";
 import type { OpenlistFileEntry } from "../api/openlist/list";
 import { useOpenlistStore } from "../stores/openlist";
 import { useRouter } from "../utils/router-lite";
@@ -209,6 +210,12 @@ const fetchDirectory = async (path: string) => {
       attachToParent(normalizedPath, children);
     }
   } catch (error) {
+    if (error instanceof OpenlistApiError && error.shouldLogout) {
+      message.error("登录已过期，请重新登录");
+      await clearSession();
+      router.push({ name: "openlist-login" });
+      return;
+    }
     const fallback = error instanceof Error ? error.message : String(error);
     message.error(`获取目录失败：${fallback}`);
   } finally {
@@ -288,6 +295,12 @@ const handleRemoveSelected = async () => {
     message.success("删除成功，正在刷新目录");
     fetchDirectory(activeDir.value);
   } catch (error) {
+    if (error instanceof OpenlistApiError && error.shouldLogout) {
+      message.error("登录已过期，请重新登录");
+      await clearSession();
+      router.push({ name: "openlist-login" });
+      return;
+    }
     const fallback = error instanceof Error ? error.message : String(error);
     message.error(`删除失败：${fallback}`);
   } finally {

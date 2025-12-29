@@ -1,5 +1,10 @@
 import { requestJson } from "../../utils/request";
-import { normalizeOpenlistBaseUrl } from "./utils";
+import {
+  ensureOpenlistSuccess,
+  normalizeOpenlistBaseUrl,
+  OpenlistApiError,
+  type OpenlistApiResponse,
+} from "./utils";
 
 interface RawOpenlistEntry {
   name: string;
@@ -25,11 +30,7 @@ export interface OpenlistDirectoryResult {
   directories: { name: string; path: string }[];
 }
 
-interface OpenlistListResponse {
-  data?: { content?: RawOpenlistEntry[] };
-  message?: string;
-  error?: string;
-}
+type OpenlistListResponse = OpenlistApiResponse<{ content?: RawOpenlistEntry[] }>;
 
 function formatSize(size?: number) {
   if (!size || size <= 0) return "--";
@@ -83,7 +84,9 @@ export async function listOpenlistDirectory(
       body: { path: currentPath, password: "" },
     });
 
-    const rawList: RawOpenlistEntry[] = payload.data?.content || [];
+    const data = ensureOpenlistSuccess(payload);
+
+    const rawList: RawOpenlistEntry[] = data?.content || [];
     const entries: OpenlistFileEntry[] = rawList.map((item) => {
       const isDir = Boolean(item.is_dir);
       const updatedTime = item.modified ? new Date(item.modified).getTime() : undefined;
@@ -105,6 +108,9 @@ export async function listOpenlistDirectory(
 
     return { entries, directories };
   } catch (error) {
+    if (error instanceof OpenlistApiError) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`获取目录失败：${reason}`);
   }
