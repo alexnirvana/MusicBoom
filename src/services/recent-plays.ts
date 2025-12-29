@@ -14,9 +14,10 @@ export interface RecentPlayRow {
 }
 
 // 记录单首歌曲的播放，重复播放会更新 lastPlayed 并移动到最前
-export async function recordRecentPlay(song: NavidromeSong) {
+// 返回 true 代表写入成功，false 代表数据库不可用
+export async function recordRecentPlay(song: NavidromeSong): Promise<boolean> {
   const db = await mysqlConnectionManager.getDatabase();
-  if (!db) return;
+  if (!db) return false;
 
   const now = Date.now();
   await db.execute(
@@ -51,6 +52,7 @@ export async function recordRecentPlay(song: NavidromeSong) {
       ) AS latest
     )
   `);
+  return true;
 }
 
 // 读取最近播放列表，默认最多返回 500 条，按播放时间倒序排列

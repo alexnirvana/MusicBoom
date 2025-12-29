@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useMessage } from "naive-ui";
 import MainLayout from "../layouts/MainLayout.vue";
 import SongTable from "../components/SongTable.vue";
@@ -8,6 +8,7 @@ import { useSettingsStore } from "../stores/settings";
 import { useAuthStore } from "../stores/auth";
 import { usePlayerStore } from "../stores/player";
 import type { FetchSongsOptions, NavidromeSong } from "../api/navidrome";
+import { listenRecentPlayUpdated } from "../utils/recent-play-events";
 
 const loading = ref(false);
 const recentSongs = ref<NavidromeSong[]>([]);
@@ -15,6 +16,8 @@ const message = useMessage();
 const { state: authState } = useAuthStore();
 const { state: settingsState, ready: settingsReady } = useSettingsStore();
 const player = usePlayerStore();
+let stopRecentPlayListener: (() => void) | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 复用 Navidrome 鉴权上下文，便于直接播放
 function resolveNavidromeContext(): FetchSongsOptions {
@@ -81,8 +84,26 @@ async function handlePlayNext(payload: { row: NavidromeSong; list: NavidromeSong
   }
 }
 
+// 节流刷新，避免频繁更新 UI
+function scheduleRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null;
+    void loadRecentSongs();
+  }, 400);
+}
+
 onMounted(() => {
   loadRecentSongs();
+  stopRecentPlayListener = listenRecentPlayUpdated(scheduleRefresh);
+});
+
+onUnmounted(() => {
+  stopRecentPlayListener?.();
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
 });
 </script>
 
