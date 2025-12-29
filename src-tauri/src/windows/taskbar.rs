@@ -3,11 +3,12 @@
 //! 仅在 Windows 上编译；其他平台不启用。
 
 #![cfg(windows)]
+#![allow(dead_code)]
 
 use std::{ffi::c_void, mem::size_of, ptr::null_mut, sync::OnceLock};
 
 use image::{imageops::FilterType, DynamicImage, GenericImageView, Rgba};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Window};
 use windows::{
     core::{GUID, HRESULT},
     Win32::{
@@ -26,7 +27,7 @@ use windows::{
         UI::{
             Shell::{
                 DefSubclassProc, ITaskbarList3, SetWindowSubclass, THBF_ENABLED, THB_FLAGS,
-                THB_ICON, THB_TOOLTIP, THUMBBUTTON, THUMBBUTTONMASK,
+                THB_ICON, THB_TOOLTIP, THUMBBUTTON,
             },
             WindowsAndMessaging::{CreateIconIndirect, DestroyIcon, ICONINFO, WM_COMMAND},
         },
@@ -45,7 +46,7 @@ static BUTTONS_READY: OnceLock<()> = OnceLock::new();
 /// 在应用启动时注册主窗口的子类回调，用于响应缩略工具栏按钮点击。
 pub fn register_window(app: &tauri::App) -> tauri::Result<()> {
     let window = app
-        .get_webview_window("main")
+        .get_webview_window("auth")
         .ok_or(tauri::Error::WindowNotFound)?;
 
     let hwnd = window.hwnd()?;
@@ -53,7 +54,7 @@ pub fn register_window(app: &tauri::App) -> tauri::Result<()> {
     WINDOW_LABEL.set(window.label().to_string()).ok();
 
     unsafe {
-        SetWindowSubclass(hwnd.0 as _, Some(subclass_proc), 1, 0);
+        let _ = SetWindowSubclass(HWND(hwnd.0 as *mut c_void), Some(subclass_proc), 1, 0);
     }
 
     Ok(())
@@ -61,37 +62,48 @@ pub fn register_window(app: &tauri::App) -> tauri::Result<()> {
 
 /// 更新任务栏缩略图（封面图）与缩略工具栏按钮状态。
 pub fn update_thumbnail_and_buttons(
-    window: &WebviewWindow,
+    window: &Window,
     cover_data: Option<Vec<u8>>,
     is_playing: bool,
     title: Option<String>,
 ) -> Result<(), String> {
+    println!("开始更新任务栏缩略图...");
     let hwnd = window.hwnd().map_err(anyhow_to_string)?;
     enable_iconic_attributes(hwnd).map_err(anyhow_to_string)?;
+    println!("启用图标化属性成功");
     apply_thumbnail(hwnd, cover_data).map_err(anyhow_to_string)?;
-    apply_buttons(hwnd, is_playing, title).map_err(anyhow_to_string)?;
+    println!("应用缩略图成功");
+    apply_buttons(hwnd, is_playing, &title).map_err(anyhow_to_string)?;
+    println!("应用按钮成功，播放状态: {}, 标题: {:?}", is_playing, title);
     Ok(())
 }
 
 fn apply_thumbnail(hwnd: HWND, cover_data: Option<Vec<u8>>) -> Result<(), HRESULT> {
     let data = match cover_data {
-        Some(d) if !d.is_empty() => d,
-        _ => return Ok(()),
+        Some(d) if !d.is_empty() => {
+            println!("封面数据大小: {} bytes", d.len());
+            d
+        },
+        _ => {
+            println!("无封面数据，跳过缩略图更新");
+            return Ok(())
+        },
     };
 
-    let img = image::load_from_memory(&data).map_err(|_| HRESULT(0x80070057))?;
+    let img = image::load_from_memory(&data).map_err(|_| HRESULT(0x80070057u32 as i32))?;
     let thumb = create_thumbnail_bitmap(img)?;
     unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) }?;
-    unsafe {
-        DeleteObject(HGDIOBJ(thumb.0));
-    }
+    let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
+    println!("缩略图设置完成");
     Ok(())
 }
 
-fn apply_buttons(hwnd: HWND, is_playing: bool, title: Option<String>) -> Result<(), HRESULT> {
+fn apply_buttons(hwnd: HWND, is_playing: bool, title: &Option<String>) -> Result<(), HRESULT> {
+    println!("开始应用任务栏按钮...");
     let taskbar: ITaskbarList3 =
         unsafe { CoCreateInstance(&TASKBAR_LIST_CLSID, None, CLSCTX_INPROC_SERVER) }?;
     unsafe { taskbar.HrInit()? };
+    println!("任务栏列表初始化成功");
 
     let prev_icon = build_icon(Glyph::Prev)?;
     let play_icon = build_icon(if is_playing {
@@ -130,9 +142,11 @@ fn apply_buttons(hwnd: HWND, is_playing: bool, title: Option<String>) -> Result<
 
     if BUTTONS_READY.get().is_some() {
         unsafe { taskbar.ThumbBarUpdateButtons(hwnd, &buttons)? };
+        println!("更新任务栏按钮成功");
     } else {
         unsafe { taskbar.ThumbBarAddButtons(hwnd, &buttons)? };
         let _ = BUTTONS_READY.set(());
+        println!("添加任务栏按钮成功");
     }
 
     if let Some(text) = title {
@@ -142,13 +156,12 @@ fn apply_buttons(hwnd: HWND, is_playing: bool, title: Option<String>) -> Result<
         button.dwFlags = THBF_ENABLED;
         set_tip(&mut button.szTip, &text);
         unsafe { taskbar.ThumbBarUpdateButtons(hwnd, &[button])? };
+        println!("更新按钮提示为: {}", text);
     }
 
-    unsafe {
-        DestroyIcon(prev_icon);
-        DestroyIcon(play_icon);
-        DestroyIcon(next_icon);
-    }
+    let _ = unsafe { DestroyIcon(prev_icon) };
+    let _ = unsafe { DestroyIcon(play_icon) };
+    let _ = unsafe { DestroyIcon(next_icon) };
 
     Ok(())
 }
@@ -211,7 +224,7 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
     let hbitmap = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }
         .map_err(|e| e.code())?;
     if hbitmap.is_invalid() || bits.is_null() {
-        return Err(HRESULT(0x80070057));
+        return Err(HRESULT(0x80070057u32 as i32));
     }
 
     unsafe {
@@ -256,7 +269,10 @@ fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::H
 
     let color = create_hbitmap_from_bgra(&bgra, size as i32, size as i32)?;
     let size_i32: i32 = size as i32;
-    let mask = unsafe { CreateBitmap(size_i32, size_i32, 1, 1, None) }.map_err(|e| e.code())?;
+    let mask = unsafe { CreateBitmap(size_i32, size_i32, 1, 1, None) };
+    if mask.is_invalid() {
+        return Err(HRESULT(0x80070057u32 as i32));
+    }
 
     let info = ICONINFO {
         fIcon: true.into(),
@@ -267,10 +283,8 @@ fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::H
     };
 
     let hicon = unsafe { CreateIconIndirect(&info) }.map_err(|e| e.code())?;
-    unsafe {
-        DeleteObject(HGDIOBJ(mask.0));
-        DeleteObject(HGDIOBJ(color.0));
-    }
+    let _ = unsafe { DeleteObject(HGDIOBJ(mask.0)) };
+    let _ = unsafe { DeleteObject(HGDIOBJ(color.0)) };
 
     Ok(hicon)
 }
@@ -357,14 +371,27 @@ fn anyhow_to_string<T: std::fmt::Debug>(err: T) -> String {
     format!("{:?}", err)
 }
 
+#[allow(dead_code)]
 trait PixelExt {
     fn get_pixel_mut_checked(&mut self, x: u32, y: u32) -> Option<&mut image::Rgba<u8>>;
 }
 
+#[allow(dead_code)]
 impl PixelExt for image::RgbaImage {
     fn get_pixel_mut_checked(&mut self, x: u32, y: u32) -> Option<&mut image::Rgba<u8>> {
         if x < self.width() && y < self.height() {
             Some(self.get_pixel_mut(x, y))
+        } else {
+            None
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl PixelExt for &mut image::RgbaImage {
+    fn get_pixel_mut_checked(&mut self, x: u32, y: u32) -> Option<&mut image::Rgba<u8>> {
+        if x < self.width() && y < self.height() {
+            Some((*self).get_pixel_mut(x, y))
         } else {
             None
         }
