@@ -69,8 +69,7 @@ export async function listDownloadRecords(status?: DownloadStatus): Promise<Down
 
   if (status) {
     const rows = await db.select(
-      `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads WHERE status = ? ORDER BY title COLLATE utf8mb4_unicode_ci`,
-      [status]
+      `SELECT song_id as songId, title, album, size, status, progress, file_path as filePath, error_message as errorMessage FROM downloads WHERE status = '${status}' ORDER BY title COLLATE utf8mb4_unicode_ci`
     );
     return rows as unknown as DownloadRecord[];
   }

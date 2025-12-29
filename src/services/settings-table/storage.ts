@@ -7,8 +7,7 @@ export async function readSetting<T>(name: string): Promise<T | null> {
     if (!db) return null;
 
     const result = await db.select(
-      "SELECT value FROM settings WHERE name = ?",
-      [name]
+      `SELECT value FROM settings WHERE name = '${name}'`
     );
     if (!result || (result as any[]).length === 0) return null;
     try {

@@ -71,8 +71,7 @@ export async function listRecentPlays(limit = 500): Promise<RecentPlayRow[]> {
        last_played AS lastPlayed
      FROM recent_plays
      ORDER BY last_played DESC
-     LIMIT ?`,
-    [finalLimit]
+     LIMIT ${finalLimit}`
   );
   return rows as unknown as RecentPlayRow[];
 }

@@ -18,8 +18,7 @@ export async function isFavorite(songId: string): Promise<boolean> {
   if (!db) return false;
 
   const result = await db.select(
-    `SELECT COUNT(1) as count FROM favorites WHERE song_id = ?`,
-    [songId]
+    `SELECT COUNT(1) as count FROM favorites WHERE song_id = '${songId}'`
   );
   return Boolean((result as any)[0]?.count);
 }

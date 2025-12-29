@@ -67,9 +67,8 @@ export async function listPlaylistSongs(playlistId: string): Promise<NavidromeSo
   const result = await db.select(
     `SELECT song_id, title, artist, album, duration, size
      FROM playlist_songs
-     WHERE playlist_id = ?
-     ORDER BY title COLLATE utf8mb4_unicode_ci`,
-    [Number(playlistId)]
+     WHERE playlist_id = ${Number(playlistId)}
+     ORDER BY title COLLATE utf8mb4_unicode_ci`
   );
   return (result as any[]).map((r: any) => ({
     id: r.song_id,

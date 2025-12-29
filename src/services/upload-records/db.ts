@@ -34,8 +34,7 @@ export async function getRecordByAnchorId(appAnchorId: string) {
   if (!db) return null;
 
   const result = await db.select(
-    `SELECT id, file_path, app_anchor_id, upload_time, file_size, file_name FROM upload_records WHERE app_anchor_id = ?`,
-    [appAnchorId]
+    `SELECT id, file_path, app_anchor_id, upload_time, file_size, file_name FROM upload_records WHERE app_anchor_id = '${appAnchorId}'`
   );
   return (result as any[]).length > 0 ? (result as any)[0] : null;
 }
