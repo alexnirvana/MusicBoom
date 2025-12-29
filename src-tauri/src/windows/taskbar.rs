@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::c_void,
     mem::size_of,
     ptr::null_mut,
@@ -45,33 +45,53 @@ const BUTTON_PLAY_OR_PAUSE: u32 = 2;
 const BUTTON_NEXT: u32 = 3;
 const TASKBAR_LIST_CLSID: GUID = GUID::from_u128(0x56fdf344_fd6d_11d0_958a_006097c9a090);
 
-static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
-static BUTTONS_READY: OnceLock<()> = OnceLock::new();
-static WINDOW_LABELS: OnceLock<Mutex<HashMap<isize, String>>> = OnceLock::new();
+static TASKBAR_STATE: OnceLock<TaskbarState> = OnceLock::new();
 
-fn window_labels() -> &'static Mutex<HashMap<isize, String>> {
-    WINDOW_LABELS.get_or_init(|| Mutex::new(HashMap::new()))
+struct TaskbarState {
+    app: AppHandle,
+    labels: Mutex<HashMap<isize, String>>,
+    buttons_ready: Mutex<HashSet<isize>>,
+}
+
+impl TaskbarState {
+    fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            labels: Mutex::new(HashMap::new()),
+            buttons_ready: Mutex::new(HashSet::new()),
+        }
+    }
+}
+
+fn state_from_window(window: &Window) -> &'static TaskbarState {
+    TASKBAR_STATE.get_or_init(|| TaskbarState::new(window.app_handle().clone()))
+}
+
+fn hwnd_key(hwnd: HWND) -> isize {
+    hwnd.0 as isize
+}
+
+fn to_sync_error<T: std::fmt::Debug>(err: T) -> String {
+    format!("锁被污染或不可用: {:?}", err)
 }
 
 /// 为指定窗口注册子类回调，用于响应缩略工具栏按钮点击。
 pub fn register_window(window: &Window) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(anyhow_to_string)?;
+    let state = state_from_window(window);
+    let key = hwnd_key(hwnd);
 
-    // 记录应用句柄，后续转发事件需要。
-    APP_HANDLE.set(window.app_handle()).ok();
-
-    // 避免重复注册同一个窗口。
-    let labels = window_labels();
     {
-        let mut map = labels.lock().map_err(|_| "窗口标签锁定失败".to_string())?;
-        if map.contains_key(&hwnd.0) {
+        let mut map = state.labels.lock().map_err(to_sync_error)?;
+        if map.contains_key(&key) {
             return Ok(());
         }
-        map.insert(hwnd.0, window.label().to_string());
+        map.insert(key, window.label().to_string());
     }
 
-    unsafe {
-        let _ = SetWindowSubclass(HWND(hwnd.0 as *mut c_void), Some(subclass_proc), 1, 0);
+    let ok = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), 1, 0).as_bool() };
+    if !ok {
+        return Err("设置窗口子类失败，任务栏按钮将不可用".to_string());
     }
 
     Ok(())
@@ -84,91 +104,30 @@ pub fn update_thumbnail_and_buttons(
     is_playing: bool,
     title: Option<String>,
 ) -> Result<(), String> {
-    // 确保当前窗口已注册，以便任务栏按钮事件能够回传到前端。
+    let hwnd = window.hwnd().map_err(anyhow_to_string)?;
+    let state = state_from_window(window);
+    let key = hwnd_key(hwnd);
+
     register_window(window)?;
 
-    println!("开始更新任务栏缩略图...");
-    println!("窗口标签: {}", window.label());
-
-    let hwnd = window.hwnd().map_err(anyhow_to_string)?;
-    println!("窗口句柄获取成功: {:?}", hwnd);
-
-    // 先尝试应用任务栏按钮（这个应该总是能工作的）
-    if let Err(e) = apply_buttons(hwnd, is_playing, &title) {
-        println!("应用按钮失败: {:?}", e);
-        return Err(format!("应用按钮失败: {:?}", e));
-    }
-    println!("应用按钮成功，播放状态: {}, 标题: {:?}", is_playing, title);
-
-    // 尝试启用图标化属性
-    if let Err(e) = enable_iconic_attributes(hwnd) {
-        println!("启用图标化属性失败: {:?}，跳过缩略图", e);
-        // 不返回错误，继续运行，只是没有缩略图功能
-        return Ok(());
-    }
-    println!("启用图标化属性成功");
-
-    // 尝试应用缩略图
-    if let Err(e) = apply_thumbnail(hwnd, cover_data) {
-        println!("应用缩略图失败: {:?}，但任务栏按钮应该工作正常", e);
-        // 不返回错误，继续运行，只是没有缩略图功能
-        return Ok(());
-    }
-    println!("应用缩略图成功");
+    apply_buttons(state, hwnd, key, is_playing, title.as_deref())?;
+    enable_iconic_attributes(hwnd)?;
+    apply_thumbnail(hwnd, cover_data)?;
 
     Ok(())
 }
 
-fn apply_thumbnail(hwnd: HWND, cover_data: Option<Vec<u8>>) -> Result<(), HRESULT> {
-    let image = match cover_data {
-        Some(d) if !d.is_empty() => {
-            println!("封面数据大小: {} bytes", d.len());
-            match image::load_from_memory(&d) {
-                Ok(img) => img,
-                Err(err) => {
-                    println!("封面解码失败，将使用占位缩略图: {:?}", err);
-                    build_placeholder_thumbnail()
-                }
-            }
-        }
-        _ => {
-            println!("无封面数据，将使用占位缩略图");
-            build_placeholder_thumbnail()
-        }
-    };
-
-    apply_thumbnail_image(hwnd, image)
-}
-
-fn apply_thumbnail_image(hwnd: HWND, img: DynamicImage) -> Result<(), HRESULT> {
-    let thumb = create_thumbnail_bitmap(img)?;
-
-    println!("尝试设置 DWM 缩略图...");
-    // 首先尝试标准方法
-    match unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) } {
-        Ok(_) => {
-            println!("DWM 缩略图设置成功");
-            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
-            println!("缩略图设置完成");
-            return Ok(());
-        }
-        Err(e) => {
-            println!("DWM 缩略图设置失败: {:?}", e);
-
-            // 尝试替代方法：使用 DWMWA_FORCE_ICONIC_REPRESENTATION（这个已经设置了）
-            println!("替代方法不可用，保持任务栏按钮功能正常");
-            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
-            return Err(e.into()); // 返回原始错误
-        }
-    }
-}
-
-fn apply_buttons(hwnd: HWND, is_playing: bool, title: &Option<String>) -> Result<(), HRESULT> {
-    println!("开始应用任务栏按钮...");
+fn apply_buttons(
+    state: &TaskbarState,
+    hwnd: HWND,
+    key: isize,
+    is_playing: bool,
+    title: Option<&str>,
+) -> Result<(), String> {
     let taskbar: ITaskbarList3 =
-        unsafe { CoCreateInstance(&TASKBAR_LIST_CLSID, None, CLSCTX_INPROC_SERVER) }?;
-    unsafe { taskbar.HrInit()? };
-    println!("任务栏列表初始化成功");
+        unsafe { CoCreateInstance(&TASKBAR_LIST_CLSID, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|e| format!("初始化任务栏接口失败: {:?}", e))?;
+    unsafe { taskbar.HrInit().map_err(|e| format!("任务栏接口激活失败: {:?}", e))? };
 
     let prev_icon = build_icon(Glyph::Prev)?;
     let play_icon = build_icon(if is_playing {
@@ -205,13 +164,25 @@ fn apply_buttons(hwnd: HWND, is_playing: bool, title: &Option<String>) -> Result
     set_tip(&mut buttons[2].szTip, "下一首");
     buttons[2].hIcon = next_icon;
 
-    if BUTTONS_READY.get().is_some() {
-        unsafe { taskbar.ThumbBarUpdateButtons(hwnd, &buttons)? };
-        println!("更新任务栏按钮成功");
+    let already_ready = {
+        let ready = state.buttons_ready.lock().map_err(to_sync_error)?;
+        ready.contains(&key)
+    };
+
+    if already_ready {
+        unsafe {
+            taskbar
+                .ThumbBarUpdateButtons(hwnd, &buttons)
+                .map_err(|e| format!("更新任务栏按钮失败: {:?}", e))?;
+        }
     } else {
-        unsafe { taskbar.ThumbBarAddButtons(hwnd, &buttons)? };
-        let _ = BUTTONS_READY.set(());
-        println!("添加任务栏按钮成功");
+        unsafe {
+            taskbar
+                .ThumbBarAddButtons(hwnd, &buttons)
+                .map_err(|e| format!("添加任务栏按钮失败: {:?}", e))?;
+        }
+        let mut ready = state.buttons_ready.lock().map_err(to_sync_error)?;
+        ready.insert(key);
     }
 
     if let Some(text) = title {
@@ -219,9 +190,12 @@ fn apply_buttons(hwnd: HWND, is_playing: bool, title: &Option<String>) -> Result
         button.iId = BUTTON_PLAY_OR_PAUSE as _;
         button.dwMask = THB_TOOLTIP | THB_FLAGS;
         button.dwFlags = THBF_ENABLED;
-        set_tip(&mut button.szTip, &text);
-        unsafe { taskbar.ThumbBarUpdateButtons(hwnd, &[button])? };
-        println!("更新按钮提示为: {}", text);
+        set_tip(&mut button.szTip, text);
+        unsafe {
+            taskbar
+                .ThumbBarUpdateButtons(hwnd, &[button])
+                .map_err(|e| format!("更新按钮提示失败: {:?}", e))?;
+        }
     }
 
     let _ = unsafe { DestroyIcon(prev_icon) };
@@ -238,32 +212,60 @@ fn set_tip(buf: &mut [u16; 260], text: &str) {
     }
 }
 
-fn enable_iconic_attributes(hwnd: HWND) -> Result<(), HRESULT> {
-    println!("启用图标化属性...");
+fn enable_iconic_attributes(hwnd: HWND) -> Result<(), String> {
     let has_iconic = 1i32;
     unsafe {
-        let result1 = DwmSetWindowAttribute(
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_HAS_ICONIC_BITMAP,
             &has_iconic as *const _ as *const c_void,
             size_of::<i32>() as _,
-        );
-        let result2 = DwmSetWindowAttribute(
+        )
+        .map_err(|e| format!("启用缩略图属性失败: {:?}", e))?;
+
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_FORCE_ICONIC_REPRESENTATION,
             &has_iconic as *const _ as *const c_void,
             size_of::<i32>() as _,
-        );
-        println!("DWM 属性设置结果: {:?}, {:?}", result1, result2);
-        result1?;
-        result2?;
+        )
+        .map_err(|e| format!("强制窗口图标化失败: {:?}", e))?;
     }
     Ok(())
 }
 
-fn create_thumbnail_bitmap(img: DynamicImage) -> Result<HBITMAP, HRESULT> {
+fn apply_thumbnail(hwnd: HWND, cover_data: Option<Vec<u8>>) -> Result<(), String> {
+    let image = match cover_data {
+        Some(data) if !data.is_empty() => match image::load_from_memory(&data) {
+            Ok(img) => img,
+            Err(err) => {
+                println!("封面解码失败，将使用占位缩略图: {:?}", err);
+                build_placeholder_thumbnail()
+            }
+        },
+        _ => build_placeholder_thumbnail(),
+    };
+
+    apply_thumbnail_image(hwnd, image)
+}
+
+fn apply_thumbnail_image(hwnd: HWND, img: DynamicImage) -> Result<(), String> {
+    let thumb = create_thumbnail_bitmap(img)?;
+
+    match unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) } {
+        Ok(_) => {
+            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
+            Ok(())
+        }
+        Err(e) => {
+            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
+            Err(format!("设置 DWM 缩略图失败: {:?}", e))
+        }
+    }
+}
+
+fn create_thumbnail_bitmap(img: DynamicImage) -> Result<HBITMAP, String> {
     let (w, h) = img.dimensions();
-    println!("原始图片尺寸: {}x{}", w, h);
     let max = 200u32;
     let mut working_img = img;
     if w > max || h > max {
@@ -271,30 +273,21 @@ fn create_thumbnail_bitmap(img: DynamicImage) -> Result<HBITMAP, HRESULT> {
     }
 
     let (target_w, target_h) = working_img.dimensions();
-    println!("目标缩略图尺寸: {}x{}", target_w, target_h);
-
-    println!("开始转换为 RGBA8...");
     let rgba = working_img.to_rgba8();
-    println!("RGBA8 转换完成，开始转换为 BGRA 预乘...");
     let bgra = to_premultiplied_bgra(&rgba);
-    println!("BGRA 转换完成，数据大小: {} bytes", bgra.len());
 
-    println!("开始创建 HBITMAP...");
     create_hbitmap_from_bgra(&bgra, target_w as i32, target_h as i32)
 }
 
 fn build_placeholder_thumbnail() -> DynamicImage {
     let size = 120u32;
-    let placeholder = RgbaImage::from_pixel(size, size, Rgba([30, 30, 30, 255]));
+    let placeholder = RgbaImage::from_pixel(size, size, Rgba([24, 24, 24, 255]));
     DynamicImage::ImageRgba8(placeholder)
 }
 
-fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HBITMAP, HRESULT> {
-    println!("创建 BITMAPINFOHEADER 结构...");
-
+fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HBITMAP, String> {
     if width <= 0 || height <= 0 {
-        println!("位图尺寸非法: {}x{}", width, height);
-        return Err(HRESULT(0x80070057u32 as i32));
+        return Err("位图尺寸非法".to_string());
     }
 
     let height_abs = height.unsigned_abs();
@@ -302,12 +295,7 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
     let expected_size = row_bytes * height_abs as usize;
 
     if pixels.len() != expected_size {
-        println!(
-            "像素数据大小不匹配，期望: {} bytes，实际: {} bytes",
-            expected_size,
-            pixels.len()
-        );
-        return Err(HRESULT(0x80070057u32 as i32));
+        return Err("像素数据大小与尺寸不匹配".to_string());
     }
 
     let mut header = BITMAPINFOHEADER::default();
@@ -319,12 +307,6 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
     header.biCompression = BI_RGB.0;
     header.biSizeImage = expected_size as u32;
 
-    println!(
-        "创建 DIB Section，尺寸: {}x{}，数据大小: {} bytes",
-        width,
-        height,
-        pixels.len()
-    );
     let mut bits: *mut c_void = null_mut();
     let info = BITMAPINFO {
         bmiHeader: header,
@@ -334,30 +316,21 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
 
     match hbitmap {
         Ok(bitmap) => {
-            if bitmap.is_invalid() {
-                println!("HBITMAP 无效");
-                return Err(HRESULT(0x80070057u32 as i32));
+            if bitmap.is_invalid() || bits.is_null() {
+                return Err("创建位图失败".to_string());
             }
-            if bits.is_null() {
-                println!("位图数据指针为空");
-                return Err(HRESULT(0x80070057u32 as i32));
-            }
-            println!("DIB Section 创建成功，开始复制像素数据...");
 
             unsafe {
                 std::ptr::copy_nonoverlapping(pixels.as_ptr(), bits as *mut u8, expected_size);
             }
-            println!("像素数据复制完成");
+
             Ok(bitmap)
         }
-        Err(e) => {
-            println!("创建 DIB Section 失败: {:?}", e);
-            Err(e.code())
-        }
+        Err(e) => Err(format!("创建 DIB Section 失败: {:?}", e)),
     }
 }
 
-fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::HICON, HRESULT> {
+fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::HICON, String> {
     let size = 48;
     let mut canvas = image::RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
     let fg = Rgba([255, 255, 255, 255]);
@@ -387,10 +360,10 @@ fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::H
     }
 
     let color = create_hbitmap_from_bgra(&bgra, size as i32, size as i32)?;
-    let size_i32: i32 = size as i32;
-    let mask = unsafe { CreateBitmap(size_i32, size_i32, 1, 1, None) };
+    let mask = unsafe { CreateBitmap(size as i32, size as i32, 1, 1, None) };
     if mask.is_invalid() {
-        return Err(HRESULT(0x80070057u32 as i32));
+        let _ = unsafe { DeleteObject(HGDIOBJ(color.0)) };
+        return Err("创建图标遮罩失败".to_string());
     }
 
     let info = ICONINFO {
@@ -401,7 +374,8 @@ fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::H
         hbmColor: color,
     };
 
-    let hicon = unsafe { CreateIconIndirect(&info) }.map_err(|e| e.code())?;
+    let hicon = unsafe { CreateIconIndirect(&info) }
+        .map_err(|e| format!("创建图标失败: {:?}", e))?;
     let _ = unsafe { DeleteObject(HGDIOBJ(mask.0)) };
     let _ = unsafe { DeleteObject(HGDIOBJ(color.0)) };
 
@@ -480,11 +454,11 @@ extern "system" fn subclass_proc(
 ) -> LRESULT {
     if msg == WM_COMMAND {
         let id = (wparam.0 & 0xffff) as u32;
-        if let Some(app) = APP_HANDLE.get() {
-            let labels = window_labels();
-            if let Ok(map) = labels.lock() {
-                if let Some(label) = map.get(&hwnd.0) {
-                    if let Some(win) = app.get_webview_window(label) {
+        if let Some(state) = TASKBAR_STATE.get() {
+            let key = hwnd_key(hwnd);
+            if let Ok(map) = state.labels.lock() {
+                if let Some(label) = map.get(&key) {
+                    if let Some(win) = state.app.get_webview_window(label) {
                         let action = match id {
                             BUTTON_PREV => Some("prev"),
                             BUTTON_PLAY_OR_PAUSE => Some("toggle"),

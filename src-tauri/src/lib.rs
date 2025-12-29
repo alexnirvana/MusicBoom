@@ -5,6 +5,8 @@ mod windows;
 
 use app_state::AppState;
 use commands::*;
+#[cfg(windows)]
+use tauri::Manager;
 
 /// Tauri 入口，后续可继续挂载插件与命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
