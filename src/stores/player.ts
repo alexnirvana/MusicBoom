@@ -3,8 +3,6 @@ import { exists, mkdir, readFile, writeFile } from "@tauri-apps/plugin-fs";
 import { computed, reactive } from "vue";
 import type { NavidromeSong } from "../api/navidrome";
 import { buildStreamUrl, getSongById } from "../api/navidrome";
-import { readSetting, writeSetting } from "../services/settings-table";
-import { SETTING_KEYS } from "../constants/setting-keys";
 import { listDownloadRecords, listLocalSongs } from "../services/library";
 import type {
   PlayAuthContext,
@@ -14,6 +12,9 @@ import type {
   PlayerState,
 } from "../types/player";
 import type { DownloadSettings } from "../types/settings";
+import { playerConfigManager } from "../services/player-config";
+import { readSetting } from "../services/settings-table";
+import { SETTING_KEYS } from "../constants/setting-keys";
 
 const audio = new Audio();
 audio.preload = "metadata";
@@ -37,42 +38,13 @@ audio.volume = state.volume;
 // 允许的播放模式集合，读取存储时用于校验（随机、顺序、单曲、列表循环）
 const PLAY_MODES: PlayMode[] = ["shuffle", "order", "single", "list"];
 
-// 从设置表恢复音量，默认保持 100% 音量
-readSetting<number>(SETTING_KEYS.PLAYER_VOLUME)
-  .then((stored) => {
-    if (stored === null) {
-      writeSetting(SETTING_KEYS.PLAYER_VOLUME, state.volume).catch((error) => {
-        console.warn("写入默认音量失败", error);
-      });
-      return;
-    }
-    const ratio = clampPercent(stored);
-    state.volume = ratio;
-    audio.volume = ratio;
-  })
-  .catch((error) => {
-    console.warn("读取音量偏好失败，已使用默认音量", error);
-  });
+// 随机模式的播放历史，便于返回上一首时精确回退
+const shuffleHistory: number[] = [];
 
-// 从设置表恢复播放模式，若缺失则写入默认的列表循环
-readSetting<PlayMode>(SETTING_KEYS.PLAYER_MODE)
-  .then((storedMode) => {
-    if (storedMode === null) {
-      writeSetting(SETTING_KEYS.PLAYER_MODE, state.mode).catch((error) => {
-        console.warn("写入默认播放模式失败", error);
-      });
-      return;
-    }
-    if (PLAY_MODES.includes(storedMode)) {
-      state.mode = storedMode;
-    } else {
-      console.warn("读取到未知的播放模式，已回退为列表循环", storedMode);
-      state.mode = "list";
-    }
-  })
-  .catch((error) => {
-    console.warn("读取播放模式失败，已回退为列表循环", error);
-  });
+// 从本地配置恢复音量与播放模式
+initializePlayerPreferences().catch((error) => {
+  console.warn("恢复播放器基础配置失败，已使用默认值", error);
+});
 
 // 计算当前播放的歌曲，未选择时返回 null
 const currentTrack = computed(() => {
@@ -127,6 +99,54 @@ function clampPercent(value: number) {
   return value;
 }
 
+// 初始化播放器的基础偏好（音量与模式）
+async function initializePlayerPreferences() {
+  await playerConfigManager.initialize();
+  const persisted = playerConfigManager.getState();
+  if (!persisted) return;
+
+  if (PLAY_MODES.includes(persisted.mode)) {
+    state.mode = persisted.mode;
+  } else {
+    console.warn("读取到未知的播放模式，已回退为列表循环", persisted.mode);
+    state.mode = "list";
+  }
+
+  const ratio = clampPercent(persisted.volume);
+  state.volume = ratio;
+  audio.volume = ratio;
+}
+
+// 记录随机播放模式下的历史轨迹，便于返回上一首
+function recordShuffleHistory() {
+  if (state.currentIndex < 0 || state.currentIndex >= state.playlist.length) return;
+  const last = shuffleHistory.length > 0 ? shuffleHistory[shuffleHistory.length - 1] : undefined;
+  if (last === state.currentIndex) return;
+
+  shuffleHistory.push(state.currentIndex);
+  const MAX_HISTORY = 200;
+  if (shuffleHistory.length > MAX_HISTORY) {
+    shuffleHistory.shift();
+  }
+}
+
+// 清空随机模式的历史记录
+function resetShuffleHistory() {
+  shuffleHistory.length = 0;
+}
+
+// 计算随机模式下的下一首索引，尽量避免重复当前歌曲
+function getNextShuffleIndex() {
+  const length = state.playlist.length;
+  if (length <= 1) return 0;
+
+  const candidates = Array.from({ length }, (_, index) => index).filter(
+    (index) => index !== state.currentIndex
+  );
+  const randomIndex = Math.floor(Math.random() * candidates.length);
+  return candidates[randomIndex];
+}
+
 // 音频 MIME 类型，统一生成 Blob URL 时使用
 const AUDIO_MIME = "audio/mpeg";
 
@@ -134,7 +154,7 @@ const AUDIO_MIME = "audio/mpeg";
 async function persistSnapshot() {
   const track = currentTrack.value;
   if (!track) {
-    await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, null);
+    await playerConfigManager.saveState({ snapshot: null });
     return;
   }
 
@@ -145,7 +165,11 @@ async function persistSnapshot() {
     updatedAt: Date.now(),
   };
 
-  await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, snapshot);
+  await playerConfigManager.saveState({
+    mode: state.mode,
+    volume: state.volume,
+    snapshot,
+  });
 }
 
 
@@ -263,6 +287,7 @@ async function playFromList(
   context: PlayAuthContext
 ) {
   state.playlist = [...list];
+  resetShuffleHistory();
   state.authContext = context;
   const nextIndex = state.playlist.findIndex((item) => item.id === targetId);
   state.currentIndex = nextIndex >= 0 ? nextIndex : 0;
@@ -301,6 +326,9 @@ async function playSongById(songId: string) {
   if (!state.authContext) return;
   const nextIndex = state.playlist.findIndex((item) => item.id === songId);
   if (nextIndex < 0) return;
+  if (state.mode === "shuffle" && nextIndex !== state.currentIndex) {
+    recordShuffleHistory();
+  }
   state.currentIndex = nextIndex;
   await playCurrent();
 }
@@ -316,15 +344,18 @@ function clearPlaylist() {
   state.progress = 0;
   state.duration = 0;
   state.error = null;
-  writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, null).catch((error) => {
-    console.warn("清空播放快照失败", error);
+  resetShuffleHistory();
+  playerConfigManager.saveState({ snapshot: null }).catch((error) => {
+    console.warn("清空播放快照文件失败", error);
   });
 }
 
-// 登录或应用启动后从数据库恢复播放记录
+// 登录或应用启动后从本地配置恢复播放记录
 async function restoreFromSnapshot(context: PlayAuthContext) {
   try {
-    const snapshot = await readSetting<PlaybackSnapshot>(SETTING_KEYS.PLAYER_SNAPSHOT);
+    await playerConfigManager.initialize();
+    const persisted = playerConfigManager.getState();
+    const snapshot = persisted?.snapshot;
     if (!snapshot) return;
 
     const sanitizedSnapshot: PlaybackSnapshot = {
@@ -338,6 +369,7 @@ async function restoreFromSnapshot(context: PlayAuthContext) {
     state.authContext = context;
     state.playlist = [track];
     state.currentIndex = 0;
+    resetShuffleHistory();
     state.mode = PLAY_MODES.includes(sanitizedSnapshot.mode)
       ? sanitizedSnapshot.mode
       : "list";
@@ -350,8 +382,12 @@ async function restoreFromSnapshot(context: PlayAuthContext) {
     audio.src = url;
     syncProgress();
 
-    // 回写去除进度信息的快照，确保数据库不再保存播放时间
-    await writeSetting(SETTING_KEYS.PLAYER_SNAPSHOT, sanitizedSnapshot);
+    // 回写去除进度信息的快照，确保本地文件只保存必要信息
+    await playerConfigManager.saveState({
+      mode: state.mode,
+      volume: state.volume,
+      snapshot: sanitizedSnapshot,
+    });
   } catch (error) {
     console.warn("恢复播放记录失败", error);
   }
@@ -373,8 +409,8 @@ async function playNext() {
   if (state.playlist.length === 0) return;
 
   if (state.mode === "shuffle") {
-    const next = Math.floor(Math.random() * state.playlist.length);
-    state.currentIndex = next;
+    recordShuffleHistory();
+    state.currentIndex = getNextShuffleIndex();
   } else if (state.mode === "order") {
     if (state.currentIndex >= state.playlist.length - 1) return;
     state.currentIndex += 1;
@@ -390,7 +426,8 @@ async function playPrev() {
   if (state.playlist.length === 0) return;
 
   if (state.mode === "shuffle") {
-    const prev = Math.floor(Math.random() * state.playlist.length);
+    const prev = shuffleHistory.pop();
+    if (prev === undefined) return;
     state.currentIndex = prev;
   } else if (state.mode === "order") {
     state.currentIndex = Math.max(0, state.currentIndex - 1);
@@ -415,7 +452,7 @@ function setVolume(value: number) {
   const ratio = clampPercent(value);
   state.volume = ratio;
   audio.volume = ratio;
-  writeSetting(SETTING_KEYS.PLAYER_VOLUME, ratio).catch((error) => {
+  playerConfigManager.saveState({ volume: ratio }).catch((error) => {
     console.warn("保存音量偏好失败", error);
   });
   persistSnapshot().catch((error) => {
@@ -427,7 +464,7 @@ function setVolume(value: number) {
 function setMode(mode: PlayMode) {
   if (!PLAY_MODES.includes(mode)) return;
   state.mode = mode;
-  writeSetting(SETTING_KEYS.PLAYER_MODE, state.mode).catch((error) => {
+  playerConfigManager.saveState({ mode: state.mode }).catch((error) => {
     console.warn("保存播放模式失败", error);
   });
   persistSnapshot().catch((error) => {
@@ -439,7 +476,7 @@ function setMode(mode: PlayMode) {
 function cycleMode() {
   const index = PLAY_MODES.indexOf(state.mode);
   state.mode = PLAY_MODES[(index + 1) % PLAY_MODES.length];
-  writeSetting(SETTING_KEYS.PLAYER_MODE, state.mode).catch((error) => {
+  playerConfigManager.saveState({ mode: state.mode }).catch((error) => {
     console.warn("保存播放模式失败", error);
   });
   persistSnapshot().catch((error) => {
