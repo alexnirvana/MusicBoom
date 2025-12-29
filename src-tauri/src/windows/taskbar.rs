@@ -7,7 +7,7 @@
 
 use std::{ffi::c_void, mem::size_of, ptr::null_mut, sync::OnceLock};
 
-use image::{imageops::FilterType, DynamicImage, GenericImageView, Rgba};
+use image::{imageops::FilterType, DynamicImage, GenericImageView, Rgba, RgbaImage};
 use tauri::{AppHandle, Emitter, Manager, Window};
 use windows::{
     core::{GUID, HRESULT},
@@ -79,18 +79,27 @@ pub fn update_thumbnail_and_buttons(
 }
 
 fn apply_thumbnail(hwnd: HWND, cover_data: Option<Vec<u8>>) -> Result<(), HRESULT> {
-    let data = match cover_data {
+    let image = match cover_data {
         Some(d) if !d.is_empty() => {
             println!("封面数据大小: {} bytes", d.len());
-            d
-        },
+            match image::load_from_memory(&d) {
+                Ok(img) => img,
+                Err(err) => {
+                    println!("封面解码失败，将使用占位缩略图: {:?}", err);
+                    build_placeholder_thumbnail()
+                }
+            }
+        }
         _ => {
-            println!("无封面数据，跳过缩略图更新");
-            return Ok(())
-        },
+            println!("无封面数据，将使用占位缩略图");
+            build_placeholder_thumbnail()
+        }
     };
 
-    let img = image::load_from_memory(&data).map_err(|_| HRESULT(0x80070057u32 as i32))?;
+    apply_thumbnail_image(hwnd, image)
+}
+
+fn apply_thumbnail_image(hwnd: HWND, img: DynamicImage) -> Result<(), HRESULT> {
     let thumb = create_thumbnail_bitmap(img)?;
     unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) }?;
     let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
@@ -209,6 +218,12 @@ fn create_thumbnail_bitmap(img: DynamicImage) -> Result<HBITMAP, HRESULT> {
     }
 
     create_hbitmap_from_bgra(&bgra, w as i32, h as i32)
+}
+
+fn build_placeholder_thumbnail() -> DynamicImage {
+    let size = 120u32;
+    let placeholder = RgbaImage::from_pixel(size, size, Rgba([30, 30, 30, 255]));
+    DynamicImage::ImageRgba8(placeholder)
 }
 
 fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HBITMAP, HRESULT> {
