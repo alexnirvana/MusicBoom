@@ -68,13 +68,34 @@ pub fn update_thumbnail_and_buttons(
     title: Option<String>,
 ) -> Result<(), String> {
     println!("开始更新任务栏缩略图...");
+    println!("窗口标签: {}", window.label());
+    
     let hwnd = window.hwnd().map_err(anyhow_to_string)?;
-    enable_iconic_attributes(hwnd).map_err(anyhow_to_string)?;
-    println!("启用图标化属性成功");
-    apply_thumbnail(hwnd, cover_data).map_err(anyhow_to_string)?;
-    println!("应用缩略图成功");
-    apply_buttons(hwnd, is_playing, &title).map_err(anyhow_to_string)?;
+    println!("窗口句柄获取成功: {:?}", hwnd);
+    
+    // 先尝试应用任务栏按钮（这个应该总是能工作的）
+    if let Err(e) = apply_buttons(hwnd, is_playing, &title) {
+        println!("应用按钮失败: {:?}", e);
+        return Err(format!("应用按钮失败: {:?}", e));
+    }
     println!("应用按钮成功，播放状态: {}, 标题: {:?}", is_playing, title);
+    
+    // 尝试启用图标化属性
+    if let Err(e) = enable_iconic_attributes(hwnd) {
+        println!("启用图标化属性失败: {:?}，跳过缩略图", e);
+        // 不返回错误，继续运行，只是没有缩略图功能
+        return Ok(());
+    }
+    println!("启用图标化属性成功");
+    
+    // 尝试应用缩略图
+    if let Err(e) = apply_thumbnail(hwnd, cover_data) {
+        println!("应用缩略图失败: {:?}，但任务栏按钮应该工作正常", e);
+        // 不返回错误，继续运行，只是没有缩略图功能
+        return Ok(());
+    }
+    println!("应用缩略图成功");
+    
     Ok(())
 }
 
@@ -101,10 +122,25 @@ fn apply_thumbnail(hwnd: HWND, cover_data: Option<Vec<u8>>) -> Result<(), HRESUL
 
 fn apply_thumbnail_image(hwnd: HWND, img: DynamicImage) -> Result<(), HRESULT> {
     let thumb = create_thumbnail_bitmap(img)?;
-    unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) }?;
-    let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
-    println!("缩略图设置完成");
-    Ok(())
+    
+    println!("尝试设置 DWM 缩略图...");
+    // 首先尝试标准方法
+    match unsafe { DwmSetIconicThumbnail(hwnd, thumb, 0) } {
+        Ok(_) => {
+            println!("DWM 缩略图设置成功");
+            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
+            println!("缩略图设置完成");
+            return Ok(());
+        },
+        Err(e) => {
+            println!("DWM 缩略图设置失败: {:?}", e);
+            
+            // 尝试替代方法：使用 DWMWA_FORCE_ICONIC_REPRESENTATION（这个已经设置了）
+            println!("替代方法不可用，保持任务栏按钮功能正常");
+            let _ = unsafe { DeleteObject(HGDIOBJ(thumb.0)) };
+            return Err(e.into()); // 返回原始错误
+        }
+    }
 }
 
 fn apply_buttons(hwnd: HWND, is_playing: bool, title: &Option<String>) -> Result<(), HRESULT> {
@@ -183,40 +219,51 @@ fn set_tip(buf: &mut [u16; 260], text: &str) {
 }
 
 fn enable_iconic_attributes(hwnd: HWND) -> Result<(), HRESULT> {
+    println!("启用图标化属性...");
     let has_iconic = 1i32;
     unsafe {
-        DwmSetWindowAttribute(
+        let result1 = DwmSetWindowAttribute(
             hwnd,
             DWMWA_HAS_ICONIC_BITMAP,
             &has_iconic as *const _ as *const c_void,
             size_of::<i32>() as _,
-        )?;
-        DwmSetWindowAttribute(
+        );
+        let result2 = DwmSetWindowAttribute(
             hwnd,
             DWMWA_FORCE_ICONIC_REPRESENTATION,
             &has_iconic as *const _ as *const c_void,
             size_of::<i32>() as _,
-        )?;
+        );
+        println!("DWM 属性设置结果: {:?}, {:?}", result1, result2);
+        result1?;
+        result2?;
     }
     Ok(())
 }
 
 fn create_thumbnail_bitmap(img: DynamicImage) -> Result<HBITMAP, HRESULT> {
     let (w, h) = img.dimensions();
+    println!("原始图片尺寸: {}x{}", w, h);
     let max = 200u32;
     let (w, h) = if w > max || h > max {
         img.resize(max, max, FilterType::CatmullRom).dimensions()
     } else {
         (w, h)
     };
+    println!("目标缩略图尺寸: {}x{}", w, h);
 
+    println!("开始转换为 RGBA8...");
     let resized = img.resize_exact(w, h, FilterType::Triangle).to_rgba8();
+    println!("RGBA8 转换完成，开始转换为 BGRA...");
+    
     let mut bgra = Vec::with_capacity((w * h * 4) as usize);
     for chunk in resized.chunks(4) {
         let rgba = Rgba([chunk[0], chunk[1], chunk[2], chunk[3]]);
         bgra.extend_from_slice(&[rgba[2], rgba[1], rgba[0], rgba[3]]);
     }
+    println!("BGRA 转换完成，数据大小: {} bytes", bgra.len());
 
+    println!("开始创建 HBITMAP...");
     create_hbitmap_from_bgra(&bgra, w as i32, h as i32)
 }
 
@@ -227,6 +274,7 @@ fn build_placeholder_thumbnail() -> DynamicImage {
 }
 
 fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HBITMAP, HRESULT> {
+    println!("创建 BITMAPINFO 结构...");
     let mut info = BITMAPINFO::default();
     info.bmiHeader.biSize = size_of::<BITMAPINFOHEADER>() as _;
     info.bmiHeader.biWidth = width;
@@ -235,22 +283,41 @@ fn create_hbitmap_from_bgra(pixels: &[u8], width: i32, height: i32) -> Result<HB
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB.0 as _;
 
+    println!("创建 DIB Section，尺寸: {}x{}，数据大小: {} bytes", width, height, pixels.len());
     let mut bits: *mut c_void = null_mut();
-    let hbitmap = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }
-        .map_err(|e| e.code())?;
-    if hbitmap.is_invalid() || bits.is_null() {
-        return Err(HRESULT(0x80070057u32 as i32));
+    let hbitmap = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) };
+    
+    match hbitmap {
+        Ok(bitmap) => {
+            if bitmap.is_invalid() {
+                println!("HBITMAP 无效");
+                return Err(HRESULT(0x80070057u32 as i32));
+            }
+            if bits.is_null() {
+                println!("位图数据指针为空");
+                return Err(HRESULT(0x80070057u32 as i32));
+            }
+            println!("DIB Section 创建成功，开始复制像素数据...");
+            
+            unsafe {
+                let expected_size = (width * height * 4) as usize;
+                if pixels.len() != expected_size {
+                    println!("警告: 像素数据大小不匹配，期望: {}, 实际: {}", expected_size, pixels.len());
+                }
+                std::ptr::copy_nonoverlapping(
+                    pixels.as_ptr(),
+                    bits as *mut u8,
+                    pixels.len().min(expected_size),
+                );
+            }
+            println!("像素数据复制完成");
+            Ok(bitmap)
+        },
+        Err(e) => {
+            println!("创建 DIB Section 失败: {:?}", e);
+            Err(e.code())
+        }
     }
-
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            pixels.as_ptr(),
-            bits as *mut u8,
-            (width * height * 4) as usize,
-        );
-    }
-
-    Ok(hbitmap)
 }
 
 fn build_icon(glyph: Glyph) -> Result<windows::Win32::UI::WindowsAndMessaging::HICON, HRESULT> {
