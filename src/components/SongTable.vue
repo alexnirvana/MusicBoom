@@ -10,6 +10,7 @@ import {
   NSpin,
   NTooltip,
   type DataTableColumns,
+  type DataTableSortState,
   type DropdownDividerOption,
   type DropdownOption,
   type DropdownGroupOption,
@@ -32,6 +33,9 @@ const props = defineProps({
   emptyHint: { type: String, default: "暂无歌曲数据，尝试同步或检查连接。" },
   searchPlaceholder: { type: String, default: "搜索标题、歌手或专辑" },
   createdColumnLabel: { type: String, default: "创建时间" },
+  showPlayCount: { type: Boolean, default: false },
+  playCountLabel: { type: String, default: "播放次数" },
+  defaultSort: { type: Object as PropType<DataTableSortState | null>, default: null },
 });
 
 const emit = defineEmits<{
@@ -157,6 +161,15 @@ const columns = computed<DataTableColumns<NavidromeSong>>(() => [
     sorter: (row1, row2) => row1.duration - row2.duration,
     render: (row) => formatDuration(row.duration) 
   },
+  ...(props.showPlayCount
+    ? [{
+        title: props.playCountLabel,
+        key: "playCount",
+        width: 120,
+        sorter: (row1: NavidromeSong, row2: NavidromeSong) => (row1.playCount ?? 0) - (row2.playCount ?? 0),
+        render: (row: NavidromeSong) => row.playCount ?? 0,
+      } as const]
+    : []),
   {
     title: props.createdColumnLabel,
     key: "created",
@@ -421,7 +434,7 @@ defineExpose({ locateRow });
           :bordered="false"
           :columns="columns"
           :data="filteredSongs"
-          :default-sort="{ columnKey: 'created', order: 'descend' }"
+          :default-sort="props.defaultSort ?? { columnKey: 'created', order: 'descend', sorter: 'default' }"
           :loading="loading"
           :pagination="false"
           :row-key="(row: NavidromeSong) => row.id"

@@ -9,6 +9,7 @@ export interface NavidromeSong {
   size?: number;
   comment?: string;
   created?: string;
+  playCount?: number;
 }
 
 export interface SubsonicSong {

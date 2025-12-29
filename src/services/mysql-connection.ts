@@ -185,6 +185,23 @@ class MySqlConnectionManager {
         INDEX idx_last_played (last_played)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 创建播放统计表，单独维护播放次数，避免与最近播放互相干扰
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS play_stats (
+        song_id VARCHAR(255) PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        album TEXT NOT NULL,
+        duration INT NOT NULL,
+        created TEXT,
+        cover_url TEXT,
+        play_count INT NOT NULL DEFAULT 1,
+        last_played BIGINT NOT NULL,
+        INDEX idx_play_count (play_count),
+        INDEX idx_last_played (last_played)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   }
 
   /**

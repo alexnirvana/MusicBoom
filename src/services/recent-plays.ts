@@ -13,6 +13,18 @@ export interface RecentPlayRow {
   lastPlayed: number;
 }
 
+export interface PlayStatRow {
+  songId: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  created?: string | null;
+  coverUrl?: string | null;
+  playCount: number;
+  lastPlayed: number;
+}
+
 // 记录单首歌曲的播放，重复播放会更新 lastPlayed 并移动到最前
 // 返回 true 代表写入成功，false 代表数据库不可用
 export async function recordRecentPlay(song: NavidromeSong): Promise<boolean> {
@@ -20,6 +32,7 @@ export async function recordRecentPlay(song: NavidromeSong): Promise<boolean> {
   if (!db) return false;
 
   const now = Date.now();
+  await recordPlayStat(song, now);
   await db.execute(
     `INSERT INTO recent_plays (song_id, title, artist, album, duration, created, cover_url, last_played)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -76,4 +89,58 @@ export async function listRecentPlays(limit = 500): Promise<RecentPlayRow[]> {
      LIMIT ${finalLimit}`
   );
   return rows as unknown as RecentPlayRow[];
+}
+
+// 写入或累加播放统计，单独维护播放次数
+export async function recordPlayStat(song: NavidromeSong, timestamp: number): Promise<void> {
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return;
+
+  await db.execute(
+    `INSERT INTO play_stats (song_id, title, artist, album, duration, created, cover_url, play_count, last_played)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+     ON DUPLICATE KEY UPDATE
+       title=VALUES(title),
+       artist=VALUES(artist),
+       album=VALUES(album),
+       duration=VALUES(duration),
+       created=VALUES(created),
+       cover_url=VALUES(cover_url),
+       play_count=play_count + 1,
+       last_played=VALUES(last_played)`,
+    [
+      song.id,
+      song.title,
+      song.artist,
+      song.album,
+      song.duration,
+      song.created || null,
+      song.coverUrl || null,
+      timestamp,
+    ]
+  );
+}
+
+// 按播放次数倒序读取，播放次数相同时以最近播放时间倒序
+export async function listMostPlayed(limit = 200): Promise<PlayStatRow[]> {
+  const db = await mysqlConnectionManager.getDatabase();
+  if (!db) return [];
+
+  const finalLimit = Math.max(1, Math.min(limit, 500));
+  const rows = await db.select(
+    `SELECT
+       song_id AS songId,
+       title,
+       artist,
+       album,
+       duration,
+       created,
+       cover_url AS coverUrl,
+       play_count AS playCount,
+       last_played AS lastPlayed
+     FROM play_stats
+     ORDER BY play_count DESC, last_played DESC
+     LIMIT ${finalLimit}`
+  );
+  return rows as unknown as PlayStatRow[];
 }
