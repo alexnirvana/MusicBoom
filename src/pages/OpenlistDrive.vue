@@ -166,15 +166,19 @@ const attachToParent = (path: string, children: TreeOption[]) => {
   }
 };
 
-// 拉取真实网盘目录
-const fetchDirectory = async (path: string) => {
+// 拉取真实网盘目录，支持仅刷新树节点避免打断右侧列表排序
+const fetchDirectory = async (path: string, options: { onlyTree?: boolean } = {}) => {
+  const { onlyTree = false } = options;
+
   if (!state.token || !state.baseUrl) {
     message.warning("请先登录 OpenList 网盘");
     router.push({ name: "openlist-login" });
     return;
   }
 
-  loading.value = true;
+  if (!onlyTree) {
+    loading.value = true;
+  }
   try {
     const normalizedPath = path || "/";
     const { entries, directories } = await listOpenlistDirectory(
@@ -183,13 +187,19 @@ const fetchDirectory = async (path: string) => {
       normalizedPath
     );
 
-    files.value = entries;
-    selectedPaths.value.clear();
-    selectionMode.value = false;
-    activeDir.value = normalizedPath;
-    expandedKeys.value = Array.from(
-      new Set([...expandedKeys.value, ...buildAncestorKeys(normalizedPath)]),
-    );
+    if (!onlyTree) {
+      files.value = entries;
+      selectedPaths.value.clear();
+      selectionMode.value = false;
+      activeDir.value = normalizedPath;
+      expandedKeys.value = Array.from(
+        new Set([...expandedKeys.value, ...buildAncestorKeys(normalizedPath)]),
+      );
+
+      // 上传刷新或切换目录后，始终保持按更新日期倒序展示
+      sortKey.value = "updated";
+      sortOrder.value = "desc";
+    }
 
     const children = directories.map<TreeOption>((dir) => ({
       key: dir.path,
@@ -198,7 +208,7 @@ const fetchDirectory = async (path: string) => {
     }));
 
     // 记录根目录列表，便于下拉筛选
-    if (normalizedPath === "/") {
+    if (!onlyTree && normalizedPath === "/") {
       rootOptions.value = directories.map((dir) => ({
         label: dir.name,
         value: dir.path,
@@ -219,7 +229,9 @@ const fetchDirectory = async (path: string) => {
     const fallback = error instanceof Error ? error.message : String(error);
     message.error(`获取目录失败：${fallback}`);
   } finally {
-    loading.value = false;
+    if (!onlyTree) {
+      loading.value = false;
+    }
   }
 };
 
@@ -234,6 +246,20 @@ const handleDirectorySelect = (keys: Array<string | number>) => {
   if (typeof firstKey === "string") {
     fetchDirectory(firstKey);
   }
+};
+
+// 展开树节点时异步加载子目录，避免用户点击展开无反应
+const handleExpand = (keys: Array<string | number>) => {
+  const previous = new Set(expandedKeys.value);
+  expandedKeys.value = keys;
+
+  const newlyExpanded = keys.filter((key) => !previous.has(key));
+  newlyExpanded.forEach((key) => {
+    if (typeof key !== "string") return;
+    const node = findTreeNode(directoryTree.value, key);
+    if (node?.children && node.children.length > 0) return;
+    fetchDirectory(key, { onlyTree: true });
+  });
 };
 
 // 上传完成后刷新目录，保持文件列表最新
@@ -429,6 +455,7 @@ onActivated(async () => {
               :data="displayTree"
               :selected-keys="[activeDir]"
               v-model:expanded-keys="expandedKeys"
+              @update:expanded-keys="handleExpand"
               @update:selected-keys="handleDirectorySelect"
             />
           </div>
