@@ -37,7 +37,8 @@ pub fn run() {
             add_app_anchor_tag,
             add_app_anchor_tag_to_file,
             clear_directory,
-            clear_downloaded_songs
+            clear_downloaded_songs,
+            resolve_hostname
         ])
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用时出现异常");

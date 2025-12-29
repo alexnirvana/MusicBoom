@@ -13,6 +13,7 @@ import FramelessWindow from "../components/FramelessWindow.vue";
 import { appCacheDir, downloadDir, join } from "@tauri-apps/api/path";
 import { exists, mkdir } from "@tauri-apps/plugin-fs";
 import { mysqlConnectionManager } from "../services/mysql-connection";
+import { invoke } from "@tauri-apps/api/core";
 import { mysqlConfigManager } from "../services/mysql-config";
 import { navidromeConfigManager } from "../services/navidrome-config";
 import { pathConfigManager } from "../services/path-config";
@@ -298,6 +299,21 @@ function handleCancel() {
 }
 
 // MySQL配置相关函数
+// 解析主机名，如果是 http/https 地址则解析为 IP
+async function resolveHost(host: string): Promise<string> {
+  if (host.startsWith("http://") || host.startsWith("https://")) {
+    try {
+      const ip = await invoke<string>("resolve_hostname", { hostname: host });
+      console.log(`[MySQL] 解析 ${host} -> ${ip}`);
+      return ip;
+    } catch (error) {
+      console.warn("[MySQL] DNS 解析失败，使用原始主机名:", error);
+      return host;
+    }
+  }
+  return host;
+}
+
 async function loadMysqlConfig() {
   try {
     await mysqlConfigManager.initialize();
@@ -322,7 +338,11 @@ function closeMysqlModal() {
 async function handleTestMysql() {
   testingMysql.value = true;
   try {
-    const result = await testMysqlConnection(mysqlForm);
+    // 先解析主机名
+    const resolvedHost = await resolveHost(mysqlForm.host);
+    const configToTest = { ...mysqlForm, host: resolvedHost };
+
+    const result = await testMysqlConnection(configToTest);
     if (result.success) {
       message.success(result.message);
     } else {
@@ -339,7 +359,14 @@ async function handleTestMysql() {
 async function handleSaveMysql() {
   savingMysql.value = true;
   try {
-    await mysqlConfigManager.saveConfig({ ...mysqlForm });
+    // 先解析主机名
+    const resolvedHost = await resolveHost(mysqlForm.host);
+    const configToSave = { ...mysqlForm, host: resolvedHost };
+
+    await mysqlConfigManager.saveConfig(configToSave);
+    // 同时更新表单中的 host，保持一致
+    mysqlForm.host = resolvedHost;
+
     message.success("MySQL配置已保存");
     closeMysqlModal();
   } catch (error) {

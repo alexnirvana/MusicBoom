@@ -446,3 +446,36 @@ pub async fn clear_directory(path: String) -> Result<String, String> {
 pub async fn clear_downloaded_songs() -> Result<String, String> {
     Ok("此功能已迁移到前端实现".to_string())
 }
+
+/// 解析域名/IP，如果是 http/https 地址则解析为 IP
+#[tauri::command]
+pub async fn resolve_hostname(hostname: String) -> Result<String, String> {
+    // 检查是否是 http/https 地址
+    if hostname.starts_with("http://") || hostname.starts_with("https://") {
+        // 从 URL 中提取主机名
+        let url = match url::Url::parse(&hostname) {
+            Ok(u) => u,
+            Err(e) => return Err(format!("无效的 URL: {}", e)),
+        };
+
+        let host = match url.host_str() {
+            Some(h) => h,
+            None => return Err("无法从 URL 中提取主机名".to_string()),
+        };
+
+        // 使用 tokio 的标准 DNS 解析
+        match tokio::net::lookup_host(format!("{}:80", host)).await {
+            Ok(addrs) => {
+                // 获取第一个 IP 地址
+                match addrs.into_iter().next() {
+                    Some(addr) => Ok(addr.ip().to_string()),
+                    None => Err("未找到 IP 地址".to_string()),
+                }
+            }
+            Err(e) => Err(format!("DNS 解析失败: {}", e)),
+        }
+    } else {
+        // 如果不是 http/https 地址，直接返回（可能已经是 IP 或 localhost）
+        Ok(hostname)
+    }
+}
