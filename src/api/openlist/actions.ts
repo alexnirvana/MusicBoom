@@ -1,4 +1,9 @@
-import { normalizeOpenlistBaseUrl } from "./utils";
+import {
+  ensureOpenlistSuccess,
+  normalizeOpenlistBaseUrl,
+  OpenlistApiError,
+  type OpenlistApiResponse,
+} from "./utils";
 
 // 上传单个文件到指定目录，使用 OpenList 官方接口
 export async function uploadOpenlistFile(
@@ -43,14 +48,22 @@ export async function uploadOpenlistFile(
 
       if (xhr.status >= 200 && xhr.status < 300) {
         // 即使 HTTP 状态码是 200，也要检查业务状态码
-        if (payload && typeof payload.code === 'number' && payload.code !== 200) {
-           const reason = payload.message || payload.error || "未知错误";
-           reject(new Error(`上传失败 [${payload.code}]：${reason}`));
+        if (payload && typeof payload.code === "number" && payload.code !== 200) {
+          const reason = payload.message || payload.error || "未知错误";
+          if (payload.code === 401) {
+            reject(new OpenlistApiError(`上传失败 [${payload.code}]：${reason}`, payload.code));
+            return;
+          }
+          reject(new Error(`上传失败 [${payload.code}]：${reason}`));
         } else {
-           resolve(payload);
+          resolve(payload);
         }
       } else {
         const reason = payload?.message || payload?.error || xhr.statusText;
+        if (xhr.status === 401) {
+          reject(new OpenlistApiError(`上传失败：${reason}`, 401));
+          return;
+        }
         reject(new Error(`上传失败：${reason}`));
       }
     };
@@ -103,15 +116,21 @@ export async function removeOpenlistEntries(
     const rawText = await response.text();
     const contentType = response.headers.get("content-type") || "";
     const isJson = contentType.includes("application/json");
-    const payload = isJson ? (rawText ? JSON.parse(rawText) : null) : null;
+    const payload: OpenlistApiResponse<unknown> = isJson ? (rawText ? JSON.parse(rawText) : {}) : {};
 
     if (!response.ok) {
       const reason = payload?.message || payload?.error || rawText || response.statusText;
+      if (response.status === 401) {
+        throw new OpenlistApiError(reason || "登录已失效，请重新登录", 401);
+      }
       throw new Error(`删除失败：${reason}`);
     }
 
-    return payload;
+    return ensureOpenlistSuccess(payload);
   } catch (error) {
+    if (error instanceof OpenlistApiError) {
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`请求删除接口失败：${reason}`);
   }

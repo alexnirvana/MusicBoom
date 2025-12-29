@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { NButton, NScrollbar, NSpin, NTag, useMessage } from "naive-ui";
 import { uploadOpenlistFile } from "../api/openlist";
+import { OpenlistApiError } from "../api/openlist/utils";
 import { useSettingsStore } from "../stores/settings";
 import { invoke } from "@tauri-apps/api/core";
 import { sendNotification } from '@tauri-apps/plugin-notification';
@@ -355,10 +356,21 @@ const processQueue = async () => {
       const fallback = error instanceof Error ? error.message : String(error);
       task.status = "error";
       // 优化错误提示
-      if (fallback.includes("storage not found")) {
-         task.message = "当前目录未挂载存储，请进入具体的挂载目录（如 /mnt/music）后再上传";
+      if (error instanceof OpenlistApiError && error.shouldLogout) {
+        task.message = "登录已过期，请重新登录后再上传";
+        // 登录失效时停止后续上传，避免重复错误
+        uploadQueue.value
+          .filter((item) => item.status === "pending")
+          .forEach((item) => {
+            item.status = "error";
+            item.message = "登录已过期，请重新登录后再上传";
+          });
+        message.error("登录已过期，请重新登录后再试");
+        break;
+      } else if (fallback.includes("storage not found")) {
+        task.message = "当前目录未挂载存储，请进入具体的挂载目录（如 /mnt/music）后再上传";
       } else {
-         task.message = fallback;
+        task.message = fallback;
       }
       message.error(`文件 ${task.name} 上传失败：${task.message}`);
     }
