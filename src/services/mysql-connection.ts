@@ -170,6 +170,21 @@ class MySqlConnectionManager {
         error_message TEXT
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 创建最近播放表
+    await this.db.execute(`
+      CREATE TABLE IF NOT EXISTS recent_plays (
+        song_id VARCHAR(255) PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        album TEXT NOT NULL,
+        duration INT NOT NULL,
+        created TEXT,
+        cover_url TEXT,
+        last_played BIGINT NOT NULL,
+        INDEX idx_last_played (last_played)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   }
 
   /**
