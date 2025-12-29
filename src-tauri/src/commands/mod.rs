@@ -1,4 +1,7 @@
 use crate::app_state::{AppState, QueueKind, QueueTask, ServerConfig};
+#[cfg(windows)]
+use crate::windows::taskbar::update_thumbnail_and_buttons;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::State;
@@ -478,4 +481,38 @@ pub async fn resolve_hostname(hostname: String) -> Result<String, String> {
         // 如果不是 http/https 地址，直接返回（可能已经是 IP 或 localhost）
         Ok(hostname)
     }
+}
+
+/// Windows 任务栏缩略图与缩略工具栏更新。
+#[derive(Debug, Clone, Deserialize)]
+pub struct WindowsThumbnailPayload {
+    pub cover_data: Option<String>,
+    pub is_playing: bool,
+    pub title: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_windows_thumbnail(
+    window: tauri::Window,
+    payload: WindowsThumbnailPayload,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let cover_bytes = match payload.cover_data {
+            Some(data) => match base64::engine::general_purpose::STANDARD.decode(data) {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    println!("封面解码失败，将使用空封面: {:?}", err);
+                    None
+                }
+            },
+            None => None,
+        };
+
+        update_thumbnail_and_buttons(&window, cover_bytes, payload.is_playing, payload.title)?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Ok(())
 }
