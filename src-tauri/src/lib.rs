@@ -23,8 +23,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(windows)]
             {
-                if let Err(error) = crate::windows::taskbar::register_window(app) {
-                    println!("注册 Windows 任务栏扩展失败: {:?}", error);
+                if let Some(window) = app.get_webview_window("auth") {
+                    if let Err(error) = crate::windows::taskbar::register_window(&window) {
+                        println!("注册 Windows 任务栏扩展失败: {:?}", error);
+                    }
                 }
             }
             Ok(())
