@@ -5,7 +5,13 @@
 #![cfg(windows)]
 #![allow(dead_code)]
 
-use std::{ffi::c_void, mem::size_of, ptr::null_mut, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    mem::size_of,
+    ptr::null_mut,
+    sync::{Mutex, OnceLock},
+};
 
 use image::{imageops::FilterType, DynamicImage, GenericImageView, Rgba, RgbaImage};
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -19,8 +25,8 @@ use windows::{
                 DWMWA_HAS_ICONIC_BITMAP,
             },
             Gdi::{
-                CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER,
-                RGBQUAD, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
+                CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+                DIB_RGB_COLORS, HBITMAP, HGDIOBJ, RGBQUAD,
             },
         },
         System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER},
@@ -40,18 +46,29 @@ const BUTTON_NEXT: u32 = 3;
 const TASKBAR_LIST_CLSID: GUID = GUID::from_u128(0x56fdf344_fd6d_11d0_958a_006097c9a090);
 
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
-static WINDOW_LABEL: OnceLock<String> = OnceLock::new();
 static BUTTONS_READY: OnceLock<()> = OnceLock::new();
+static WINDOW_LABELS: OnceLock<Mutex<HashMap<isize, String>>> = OnceLock::new();
 
-/// 在应用启动时注册主窗口的子类回调，用于响应缩略工具栏按钮点击。
-pub fn register_window(app: &tauri::App) -> tauri::Result<()> {
-    let window = app
-        .get_webview_window("auth")
-        .ok_or(tauri::Error::WindowNotFound)?;
+fn window_labels() -> &'static Mutex<HashMap<isize, String>> {
+    WINDOW_LABELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
-    let hwnd = window.hwnd()?;
-    APP_HANDLE.set(app.handle().clone()).ok();
-    WINDOW_LABEL.set(window.label().to_string()).ok();
+/// 为指定窗口注册子类回调，用于响应缩略工具栏按钮点击。
+pub fn register_window(window: &Window) -> Result<(), String> {
+    let hwnd = window.hwnd().map_err(anyhow_to_string)?;
+
+    // 记录应用句柄，后续转发事件需要。
+    APP_HANDLE.set(window.app_handle()).ok();
+
+    // 避免重复注册同一个窗口。
+    let labels = window_labels();
+    {
+        let mut map = labels.lock().map_err(|_| "窗口标签锁定失败".to_string())?;
+        if map.contains_key(&hwnd.0) {
+            return Ok(());
+        }
+        map.insert(hwnd.0, window.label().to_string());
+    }
 
     unsafe {
         let _ = SetWindowSubclass(HWND(hwnd.0 as *mut c_void), Some(subclass_proc), 1, 0);
@@ -67,6 +84,9 @@ pub fn update_thumbnail_and_buttons(
     is_playing: bool,
     title: Option<String>,
 ) -> Result<(), String> {
+    // 确保当前窗口已注册，以便任务栏按钮事件能够回传到前端。
+    register_window(window)?;
+
     println!("开始更新任务栏缩略图...");
     println!("窗口标签: {}", window.label());
 
@@ -461,16 +481,19 @@ extern "system" fn subclass_proc(
     if msg == WM_COMMAND {
         let id = (wparam.0 & 0xffff) as u32;
         if let Some(app) = APP_HANDLE.get() {
-            if let Some(label) = WINDOW_LABEL.get() {
-                if let Some(win) = app.get_webview_window(label) {
-                    let action = match id {
-                        BUTTON_PREV => Some("prev"),
-                        BUTTON_PLAY_OR_PAUSE => Some("toggle"),
-                        BUTTON_NEXT => Some("next"),
-                        _ => None,
-                    };
-                    if let Some(action) = action {
-                        let _ = win.emit("windows-thumb-button", action);
+            let labels = window_labels();
+            if let Ok(map) = labels.lock() {
+                if let Some(label) = map.get(&hwnd.0) {
+                    if let Some(win) = app.get_webview_window(label) {
+                        let action = match id {
+                            BUTTON_PREV => Some("prev"),
+                            BUTTON_PLAY_OR_PAUSE => Some("toggle"),
+                            BUTTON_NEXT => Some("next"),
+                            _ => None,
+                        };
+                        if let Some(action) = action {
+                            let _ = win.emit("windows-thumb-button", action);
+                        }
                     }
                 }
             }
