@@ -42,16 +42,7 @@ const miniState = reactive<{
 });
 
 const actionVisible = ref(false);
-
-function handleMouseEnter() {
-  console.log('Mouse enter shell', actionVisible.value);
-  actionVisible.value = true;
-}
-
-function handleMouseLeave() {
-  console.log('Mouse leave shell', actionVisible.value);
-  actionVisible.value = false;
-}
+const hoverCleanup = ref<(() => void) | null>(null);
 const playlistOpen = ref(false);
 const unlistenState = ref<(() => void) | null>(null);
 const pendingPlayState = ref<boolean | null>(null);
@@ -64,6 +55,49 @@ const isFavorite = computed(() => {
   if (!miniState.track) return false;
   return miniState.favoriteIds.has(miniState.track.id);
 });
+
+function setActionVisible(visible: boolean) {
+  actionVisible.value = visible;
+}
+
+// 通过指针位置判断是否仍在精简模式范围内，避免拖拽导致的悬停状态卡死
+function syncHoverState(event: PointerEvent) {
+  const shell = shellRef.value;
+  if (!shell) return;
+
+  const rect = shell.getBoundingClientRect();
+  const inside =
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom;
+
+  setActionVisible(inside);
+}
+
+function setupHoverGuards() {
+  const handlePointerMove = (event: PointerEvent) => syncHoverState(event);
+  const handlePointerLeave = () => setActionVisible(false);
+  const handleWindowBlur = () => setActionVisible(false);
+
+  window.addEventListener("pointermove", handlePointerMove, { passive: true });
+  window.addEventListener("pointerleave", handlePointerLeave, { passive: true });
+  window.addEventListener("blur", handleWindowBlur);
+
+  hoverCleanup.value = () => {
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerleave", handlePointerLeave);
+    window.removeEventListener("blur", handleWindowBlur);
+  };
+}
+
+function handleMouseEnter() {
+  setActionVisible(true);
+}
+
+function handleMouseLeave() {
+  setActionVisible(false);
+}
 
 // 向主窗口发送指令
 async function sendCommand(type: string, payload?: Record<string, unknown>) {
@@ -143,10 +177,10 @@ async function setupStateListener() {
 }
 
 onMounted(async () => {
-  console.log("MiniPlayer onMounted, actionVisible initial:", actionVisible.value);
   await setupStateListener();
   requestState();
   await resizeWindowToContent();
+  setupHoverGuards();
 
   // 阻止双击窗口默认行为（防止最大化/还原）
   document.addEventListener('dblclick', (e) => {
@@ -157,6 +191,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unlistenState.value?.();
+  hoverCleanup.value?.();
 });
 
 watch(playlistOpen, () => {
