@@ -12,7 +12,7 @@ import {
   PlaySkipForwardSharp,
   CloseOutline,
 } from "@vicons/ionicons5";
-import { NButton, NIcon, NScrollbar } from "naive-ui";
+import { NButton, NIcon } from "naive-ui";
 
 type MiniTrack = {
   id: string;
@@ -42,7 +42,6 @@ const miniState = reactive<{
 });
 
 const actionVisible = ref(false);
-const hoverCleanup = ref<(() => void) | null>(null);
 const playlistOpen = ref(false);
 const unlistenState = ref<(() => void) | null>(null);
 const pendingPlayState = ref<boolean | null>(null);
@@ -58,37 +57,6 @@ const isFavorite = computed(() => {
 
 function setActionVisible(visible: boolean) {
   actionVisible.value = visible;
-}
-
-// 通过指针位置判断是否仍在精简模式范围内，避免拖拽导致的悬停状态卡死
-function syncHoverState(event: PointerEvent) {
-  const shell = shellRef.value;
-  if (!shell) return;
-
-  const rect = shell.getBoundingClientRect();
-  const inside =
-    event.clientX >= rect.left &&
-    event.clientX <= rect.right &&
-    event.clientY >= rect.top &&
-    event.clientY <= rect.bottom;
-
-  setActionVisible(inside);
-}
-
-function setupHoverGuards() {
-  const handlePointerMove = (event: PointerEvent) => syncHoverState(event);
-  const handlePointerLeave = () => setActionVisible(false);
-  const handleWindowBlur = () => setActionVisible(false);
-
-  window.addEventListener("pointermove", handlePointerMove, { passive: true });
-  window.addEventListener("pointerleave", handlePointerLeave, { passive: true });
-  window.addEventListener("blur", handleWindowBlur);
-
-  hoverCleanup.value = () => {
-    window.removeEventListener("pointermove", handlePointerMove);
-    window.removeEventListener("pointerleave", handlePointerLeave);
-    window.removeEventListener("blur", handleWindowBlur);
-  };
 }
 
 function handleMouseEnter() {
@@ -124,8 +92,16 @@ async function resizeWindowToContent() {
   const shell = shellRef.value;
   if (!shell) return;
   const rect = shell.getBoundingClientRect();
+  
   try {
-    await miniWindow.setSize(new LogicalSize(Math.ceil(rect.width), Math.ceil(rect.height)));
+    // 如果播放列表展开，限制最大高度，让滚动条发挥作用
+    if (playlistOpen.value) {
+      const maxHeight = 480; // 播放列表展开时的最大高度
+      const height = Math.min(Math.ceil(rect.height), maxHeight);
+      await miniWindow.setSize(new LogicalSize(Math.ceil(rect.width), height));
+    } else {
+      await miniWindow.setSize(new LogicalSize(Math.ceil(rect.width), Math.ceil(rect.height)));
+    }
   } catch (error) {
     console.error("调整精简窗口尺寸失败:", error);
   }
@@ -180,18 +156,19 @@ onMounted(async () => {
   await setupStateListener();
   requestState();
   await resizeWindowToContent();
-  setupHoverGuards();
 
-  // 阻止双击窗口默认行为（防止最大化/还原）
-  document.addEventListener('dblclick', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, { capture: true });
+  // 阻止双击卡片区域的默认行为（防止最大化/还原），但不影响窗口拖动
+  const shell = shellRef.value;
+  if (shell) {
+    shell.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, { capture: true });
+  }
 });
 
 onBeforeUnmount(() => {
   unlistenState.value?.();
-  hoverCleanup.value?.();
 });
 
 watch(playlistOpen, () => {
@@ -216,6 +193,8 @@ watch(
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
   >
+    <!-- 添加一个透明的拖动区域，确保有足够的空间进行拖动 -->
+    <div class="drag-region" :class="{ 'expanded': playlistOpen }"></div>
     <div class="mini-card">
       <div class="cover-wrap">
         <img
@@ -277,16 +256,12 @@ watch(
     <div
       class="playlist-placeholder"
       :style="{
-        display: playlistOpen ? 'flex' : 'none',
-        paddingTop: playlistOpen ? '8px' : '0px'
+        display: playlistOpen ? 'flex' : 'none'
       }"
     >
       <transition name="playlist-fade">
         <div v-if="playlistOpen" class="playlist-panel">
-          <div class="playlist-header">
-            <span class="label">播放列表</span>
-          </div>
-          <n-scrollbar class="playlist-scroll">
+          <div class="playlist-scroll">
             <ul class="playlist-list">
               <li
                 v-for="item in miniState.playlist"
@@ -299,7 +274,7 @@ watch(
                 <span class="song-artist">{{ item.artist }}</span>
               </li>
             </ul>
-          </n-scrollbar>
+          </div>
         </div>
       </transition>
     </div>
@@ -312,15 +287,26 @@ watch(
   padding: 0;
   background: transparent;
   -webkit-app-region: drag;
+  overflow: visible;
 }
 
-.mini-shell.playlist-expanded {
-  padding-bottom: 8px;
+.drag-region {
+  @apply absolute top-0 left-0 w-full h-16;
+  -webkit-app-region: drag;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 16px;
+}
+
+.drag-region.expanded {
+  @apply h-[104px];
+  border-radius: 16px 16px 0 0;
 }
 
 .mini-card {
-  @apply relative flex h-auto w-full items-center gap-3  bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
+  @apply relative flex h-auto w-full items-center gap-3 bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(8px);
   background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%),
     rgba(10, 14, 20, 0.94);
@@ -328,6 +314,11 @@ watch(
   max-width: 100%;
   margin: 0 auto;
   user-select: none;
+}
+
+.mini-shell.playlist-expanded .mini-card {
+  border-radius: 16px 16px 0 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .cover-wrap {
@@ -431,30 +422,50 @@ watch(
 }
 
 .playlist-panel {
-  @apply max-w-xl rounded-2xl bg-[#1c1f26]/95 p-3 shadow-lg;
+  @apply max-w-xl shadow-lg;
   width: 100%;
-  height: 100%;
   max-height: 360px;
   z-index: 1;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0 0 16px 16px;
   backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   -webkit-app-region: no-drag;
-}
-
-.playlist-header {
-  @apply mb-2 flex items-center;
-}
-
-.playlist-header .label {
-  @apply text-sm text-[#9eb5d6];
+  background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.5), transparent 60%),
+    rgba(10, 14, 20, 0.9);
+  margin-top: 0;
+  padding: 12px;
 }
 
 .playlist-scroll {
   @apply flex-1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  max-height: 336px; /* 窗口最大高度480 - 播放器卡片高度约80 - 内边距24 = 336px */
   min-height: 0;
-  max-height: 280px;
+}
+
+/* 自定义滚动条样式 */
+.playlist-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.playlist-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.playlist-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+.playlist-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .playlist-list {
@@ -485,7 +496,7 @@ watch(
 
 .playlist-placeholder {
   overflow: hidden;
-  transition: height 0.25s ease, padding-top 0.25s ease;
+  transition: height 0.25s ease;
   min-height: 0;
   -webkit-app-region: no-drag;
 }
