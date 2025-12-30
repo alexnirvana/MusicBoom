@@ -593,8 +593,6 @@ watch(
   width: 100%;
   max-height: 360px;
   z-index: 1;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 0 0 16px 16px;
   backdrop-filter: blur(8px);
   display: flex;
@@ -636,20 +634,24 @@ watch(
 }
 
 .playlist-list {
-  @apply m-0 list-none space-y-1 p-0;
+  @apply m-0 list-none p-0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .playlist-item {
-  @apply cursor-pointer rounded-lg px-3 py-2 transition-all;
-  display: flex;
+  @apply cursor-pointer px-3 py-2 transition-all;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
   align-items: center;
-  justify-content: space-between;
+  width: 100%;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
 }
 
 .playlist-item:hover {
-  background: rgba(112, 209, 255, 0.1);
+  background: rgba(112, 209, 255, 0.08);
 }
 
 .playlist-item.active {
@@ -659,11 +661,13 @@ watch(
 .song-title {
   @apply block truncate text-sm text-white;
   flex: 1;
+  min-width: 0;
 }
 
 .song-artist {
   @apply block truncate text-xs text-[#c6cfe0];
   flex: 1;
+  min-width: 0;
 }
 
 .song-actions {
