@@ -176,7 +176,7 @@ watch(
       </div>
 
       <div class="info-area app-no-drag" @mouseenter.stop="actionVisible = true" @mouseleave.stop="actionVisible = false">
-        <div class="title-block app-no-drag">
+        <div v-show="!actionVisible" class="title-block app-no-drag">
           <p class="title">{{ displayTitle }}</p>
           <p class="artist">{{ displayArtist }}</p>
         </div>
@@ -194,22 +194,19 @@ watch(
           <button class="icon-btn" title="下一首" @click="sendCommand('next')">
             <n-icon :component="PlaySkipForwardSharp" />
           </button>
+          <button
+            class="icon-btn playlist-indicator app-no-drag"
+            :class="{ active: playlistOpen }"
+            :title="playlistOpen ? '收起播放列表' : '播放列表'"
+            @click="playlistOpen = !playlistOpen"
+          >
+            <n-icon :component="ListOutline" />
+          </button>
+          <button class="icon-btn close-btn app-no-drag" title="返回主界面" @click="restoreMainWindow">
+            <n-icon :component="CloseOutline" />
+          </button>
         </div>
       </div>
-
-      <!-- 常驻播放列表按钮 -->
-      <button
-        class="icon-btn playlist-indicator app-no-drag"
-        :class="{ active: playlistOpen }"
-        :title="playlistOpen ? '收起播放列表' : '播放列表'"
-        @click="playlistOpen = !playlistOpen"
-      >
-        <n-icon :component="ListOutline" />
-      </button>
-
-      <button class="icon-btn close-btn app-no-drag" title="返回主界面" @click="restoreMainWindow">
-        <n-icon :component="CloseOutline" />
-      </button>
     </div>
 
     <div
@@ -295,7 +292,7 @@ watch(
 }
 
 .actions {
-  @apply mt-2 flex items-center gap-2 transition-opacity duration-200;
+  @apply flex items-center gap-2 transition-opacity duration-200;
 }
 
 .icon-btn {
@@ -321,7 +318,6 @@ watch(
 }
 
 .playlist-indicator {
-  @apply absolute right-12 top-1/2 -translate-y-1/2 h-8 w-8 border border-white/10;
   background: rgba(255, 255, 255, 0.04);
   color: #e9eefb;
   transition: all 0.2s ease;
@@ -340,7 +336,15 @@ watch(
 }
 
 .close-btn {
-  @apply absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e9eefb;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .playlist-panel {
