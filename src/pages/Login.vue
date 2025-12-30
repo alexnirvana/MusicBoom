@@ -382,7 +382,7 @@ async function handleSaveMysql() {
   <FramelessWindow
     :width="400"
     :height="560"
-    :always-on-top="true"
+    :always-on-top="false"
     :center="true"
     :rounded="true"
     radius="16px"

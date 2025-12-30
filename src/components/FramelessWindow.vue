@@ -14,7 +14,7 @@ const props = withDefaults(
   {
     width: 460,
     height: 640,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     center: true,
     rounded: true,
     radius: "16px",
