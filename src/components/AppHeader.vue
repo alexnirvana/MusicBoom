@@ -48,6 +48,9 @@ async function openMiniPlayer() {
         title: "精简模式",
         width: miniWidth,
         height: miniHeight,
+        backgroundColor: "#00000000",
+         // 关闭原生阴影，防止在 Windows 10 上出现方形阴影边界
+        shadow: false,
         decorations: false,
         resizable: false,
         visible: false,
@@ -58,7 +61,6 @@ async function openMiniPlayer() {
         center: !targetPosition,
         x: targetPosition?.x,
         y: targetPosition?.y,
-        shadow: true,
       });
 
       mini.once("tauri://created", async () => {
