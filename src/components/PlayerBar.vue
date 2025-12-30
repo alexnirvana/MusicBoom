@@ -359,25 +359,32 @@ async function emitMiniState() {
 
 // 处理来自精简模式的指令
 async function handleMiniCommand(payload: { type: string; songId?: string }) {
+  console.log("主窗口收到精简模式指令:", payload.type, payload);
   switch (payload.type) {
     case "toggle-play":
+      console.log("执行 togglePlay");
       await player.togglePlay();
       break;
     case "next":
+      console.log("执行 playNext");
       player.playNext();
       break;
     case "prev":
+      console.log("执行 playPrev");
       player.playPrev();
       break;
     case "toggle-favorite":
+      console.log("执行 toggleFavorite");
       await toggleFavorite();
       break;
     case "play-by-id":
       if (payload.songId) {
+        console.log("执行 playById:", payload.songId);
         await handlePlayFromPlaylist(payload.songId);
       }
       break;
     default:
+      console.log("未知指令类型:", payload.type);
       break;
   }
   await emitMiniState();
@@ -386,10 +393,13 @@ async function handleMiniCommand(payload: { type: string; songId?: string }) {
 // 监听精简模式事件，启动与销毁时清理
 async function setupMiniBridge() {
   await emitMiniState();
+  console.log("开始监听 player:command 事件...");
   commandUnlisten.value = await listen("player:command", async (event) => {
+    console.log("收到 player:command 事件:", event.payload);
     await handleMiniCommand(event.payload as { type: string; songId?: string });
   });
 
+  console.log("开始监听 player:state-request 事件...");
   stateRequestUnlisten.value = await listen("player:state-request", emitMiniState);
 
   miniWatchStop.value = watch(
@@ -407,6 +417,7 @@ async function setupMiniBridge() {
       emitMiniState();
     }
   );
+  console.log("精简模式桥接初始化完成");
 }
 </script>
 

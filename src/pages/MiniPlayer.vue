@@ -118,6 +118,7 @@ async function setupStateListener() {
 }
 
 onMounted(async () => {
+  console.log("MiniPlayer onMounted, actionVisible initial:", actionVisible.value);
   await setupStateListener();
   requestState();
 });
@@ -130,8 +131,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     class="mini-shell app-drag"
-    @mouseenter="actionVisible = true"
-    @mouseleave="actionVisible = false"
+    :class="{ 'playlist-expanded': playlistOpen }"
   >
     <div class="mini-card">
       <div class="cover-wrap">
@@ -145,13 +145,13 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="info-area app-no-drag">
+      <div class="info-area app-no-drag" @mouseenter.stop="actionVisible = true" @mouseleave.stop="actionVisible = false">
         <div class="title-block app-no-drag">
           <p class="title">{{ displayTitle }}</p>
           <p class="artist">{{ displayArtist }}</p>
         </div>
 
-        <div class="actions app-no-drag" :class="{ visible: actionVisible }">
+        <div v-show="actionVisible" class="actions app-no-drag">
           <button class="icon-btn" :class="{ active: isFavorite }" :title="isFavorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
             <n-icon :component="isFavorite ? HeartSharp : HeartOutline" />
           </button>
@@ -164,56 +164,71 @@ onBeforeUnmount(() => {
           <button class="icon-btn" title="下一首" @click="sendCommand('next')">
             <n-icon :component="PlaySkipForwardSharp" />
           </button>
-          <button class="icon-btn" title="播放列表" @click="playlistOpen = !playlistOpen">
-            <n-icon :component="ListOutline" />
-          </button>
         </div>
       </div>
+
+      <!-- 常驻播放列表按钮 -->
+      <button
+        class="icon-btn playlist-indicator app-no-drag"
+        :class="{ active: playlistOpen }"
+        :title="playlistOpen ? '收起播放列表' : '播放列表'"
+        @click="playlistOpen = !playlistOpen"
+      >
+        <n-icon :component="ListOutline" />
+      </button>
 
       <button class="icon-btn close-btn app-no-drag" title="返回主界面" @click="restoreMainWindow">
         <n-icon :component="CloseOutline" />
       </button>
     </div>
 
-    <transition name="playlist-fade">
-      <div v-if="playlistOpen" class="playlist-panel app-no-drag">
-        <div class="playlist-header">
-          <span class="label">播放列表</span>
-          <button class="toggle-btn" @click="playlistOpen = false">收起</button>
+    <div class="playlist-placeholder" :style="{ height: playlistOpen ? 'auto' : '0px' }">
+      <transition name="playlist-fade">
+        <div v-if="playlistOpen" class="playlist-panel app-no-drag">
+          <div class="playlist-header">
+            <span class="label">播放列表</span>
+            <button class="toggle-btn" @click="playlistOpen = false">收起</button>
+          </div>
+          <n-scrollbar class="playlist-scroll">
+            <ul class="playlist-list">
+              <li
+                v-for="item in miniState.playlist"
+                :key="item.id"
+                class="playlist-item app-no-drag"
+                :class="{ active: miniState.track?.id === item.id }"
+                @click="handlePlayById(item.id)"
+              >
+                <span class="song-title">{{ item.title }}</span>
+                <span class="song-artist">{{ item.artist }}</span>
+              </li>
+            </ul>
+          </n-scrollbar>
         </div>
-        <n-scrollbar class="playlist-scroll">
-          <ul class="playlist-list">
-            <li
-              v-for="item in miniState.playlist"
-              :key="item.id"
-              class="playlist-item app-no-drag"
-              :class="{ active: miniState.track?.id === item.id }"
-              @click="handlePlayById(item.id)"
-            >
-              <span class="song-title">{{ item.title }}</span>
-              <span class="song-artist">{{ item.artist }}</span>
-            </li>
-          </ul>
-        </n-scrollbar>
-      </div>
-    </transition>
+      </transition>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .mini-shell {
-  @apply relative h-full w-full overflow-hidden;
+  @apply relative w-full;
   padding: 0;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-shell.playlist-expanded {
+  padding-bottom: 8px;
 }
 
 .mini-card {
-  @apply relative flex h-full w-full items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
+  @apply relative flex h-auto w-full items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
-  min-height: 140px;
   background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%),
     rgba(10, 14, 20, 0.94);
+  flex-shrink: 0;
 }
 
 .cover-wrap {
@@ -245,11 +260,7 @@ onBeforeUnmount(() => {
 }
 
 .actions {
-  @apply mt-2 flex items-center gap-2 opacity-0 transition-opacity duration-200;
-}
-
-.actions.visible {
-  opacity: 1;
+  @apply mt-2 flex items-center gap-2 transition-opacity duration-200;
 }
 
 .icon-btn {
@@ -274,8 +285,27 @@ onBeforeUnmount(() => {
   border-color: rgba(239, 68, 68, 0.4);
 }
 
+.playlist-indicator {
+  @apply absolute right-12 top-1/2 -translate-y-1/2 h-8 w-8 border border-white/10;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e9eefb;
+  transition: all 0.2s ease;
+}
+
+.playlist-indicator:hover {
+  border-color: rgba(112, 209, 255, 0.6);
+  background: rgba(112, 209, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.playlist-indicator.active {
+  border-color: rgba(79, 134, 255, 0.6);
+  background: rgba(79, 134, 255, 0.12);
+  color: #4f86ff;
+}
+
 .close-btn {
-  @apply absolute right-2 top-2 h-7 w-7;
+  @apply absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8;
 }
 
 .playlist-panel {
@@ -283,11 +313,12 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  top: 100%;
   width: calc(100% - 24px);
   z-index: 10;
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(8px);
+  margin-top: 8px;
 }
 
 .playlist-header {
@@ -332,6 +363,12 @@ onBeforeUnmount(() => {
   @apply block truncate text-xs text-[#c6cfe0];
 }
 
+.playlist-placeholder {
+  overflow: hidden;
+  transition: height 0.3s ease;
+  min-height: 0;
+}
+
 .playlist-fade-enter-active,
 .playlist-fade-leave-active {
   transition: all 0.2s ease;
@@ -340,6 +377,6 @@ onBeforeUnmount(() => {
 .playlist-fade-enter-from,
 .playlist-fade-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateY(-8px);
 }
 </style>

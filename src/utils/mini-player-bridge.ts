@@ -10,6 +10,7 @@ export async function initMiniPlayerBridge() {
     const current = getCurrentWindow();
     try {
       if (main) {
+        console.log("恢复主窗口");
         await main.show();
         await main.setFocus();
       } else {
@@ -22,8 +23,15 @@ export async function initMiniPlayerBridge() {
     }
   });
 
+  // 监听来自精简模式的所有事件，确保即使主窗口隐藏也能接收
+  const commandUnlisten = await listen("player:command", async (event) => {
+    console.log("initMiniPlayerBridge 收到 player:command:", event.payload);
+    // 这个事件会被 PlayerBar 处理，这里只是为了调试
+  });
+
   return () => {
     unlisten();
+    commandUnlisten();
   };
 }
 
