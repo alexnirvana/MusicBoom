@@ -55,6 +55,10 @@ const isFavorite = computed(() => {
 // 向主窗口发送指令
 async function sendCommand(type: string, payload?: Record<string, unknown>) {
   try {
+    if (type === "toggle-play" && miniState.track) {
+      // 本地先行切换播放态，避免等待主窗口广播时按钮闪回
+      miniState.isPlaying = !miniState.isPlaying;
+    }
     await emit("player:command", { type, ...payload });
   } catch (error) {
     console.error("发送控制指令失败:", error);
@@ -184,11 +188,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mini-shell {
-  @apply h-full w-full flex items-center justify-center;
+  @apply h-full w-full flex items-center justify-center rounded-2xl;
   background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%), rgba(10, 14, 20, 0.92);
-  padding: 10px;
+  padding: 0;
   backdrop-filter: blur(14px);
-  border-radius: 18px;
+  overflow: hidden;
 }
 
 .mini-card {
@@ -196,6 +200,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
   min-height: 140px;
+  border-radius: 20px;
 }
 
 .cover-wrap {
