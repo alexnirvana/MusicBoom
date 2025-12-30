@@ -11,12 +11,10 @@ use tauri::{
 
 /// 创建托盘图标，便于精简模式下从任务栏快速唤起。
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let app_handle = app.handle();
+    let show_main = MenuItemBuilder::with_id("show-main", "显示主界面").build(app)?;
+    let quit_app = MenuItemBuilder::with_id("quit-app", "退出程序").build(app)?;
 
-    let show_main = MenuItemBuilder::with_id("show-main", "显示主界面").build(&app_handle)?;
-    let quit_app = MenuItemBuilder::with_id("quit-app", "退出程序").build(&app_handle)?;
-
-    let tray_menu = MenuBuilder::new(&app_handle)
+    let tray_menu = MenuBuilder::new(app)
         .items(&[&show_main, &quit_app])
         .build()?;
 
@@ -26,6 +24,11 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show-main" => {
+                // 关闭精简模式窗口
+                if let Some(mini) = app.get_webview_window("mini-player") {
+                    let _ = mini.close();
+                }
+                // 显示主窗口
                 if let Some(main) = app.get_webview_window("main") {
                     let _ = main.show();
                     let _ = main.set_focus();
@@ -40,13 +43,17 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click { button, .. } = event {
                 if button == MouseButton::Left {
-                    if let Some(main) = tray
-                        .app_handle()
-                        .get_webview_window("main")
-                        .or_else(|| tray.app_handle().get_webview_window("mini-player"))
-                    {
+                    // 关闭精简模式窗口
+                    if let Some(mini) = tray.app_handle().get_webview_window("mini-player") {
+                        let _ = mini.close();
+                    }
+                    // 显示主窗口
+                    if let Some(main) = tray.app_handle().get_webview_window("main") {
                         let _ = main.show();
                         let _ = main.set_focus();
+                    } else if let Some(auth) = tray.app_handle().get_webview_window("auth") {
+                        let _ = auth.show();
+                        let _ = auth.set_focus();
                     }
                 }
             }
