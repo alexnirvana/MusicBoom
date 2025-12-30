@@ -182,7 +182,14 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div class="playlist-placeholder" :style="{ height: playlistOpen ? 'auto' : '0px' }">
+    <div
+      class="playlist-placeholder app-no-drag"
+      :style="{
+        flex: playlistOpen ? '1 1 0%' : '0 0 auto',
+        height: playlistOpen ? 'auto' : '0px',
+        paddingTop: playlistOpen ? '8px' : '0px'
+      }"
+    >
       <transition name="playlist-fade">
         <div v-if="playlistOpen" class="playlist-panel app-no-drag">
           <div class="playlist-header">
@@ -211,11 +218,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mini-shell {
-  @apply relative w-full;
+  @apply relative flex h-full w-full flex-col;
   padding: 0;
   background: transparent;
-  display: flex;
-  flex-direction: column;
 }
 
 .mini-shell.playlist-expanded {
@@ -310,15 +315,13 @@ onBeforeUnmount(() => {
 
 .playlist-panel {
   @apply max-w-xl rounded-2xl bg-[#1c1f26]/95 p-3 shadow-lg;
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 100%;
-  width: calc(100% - 24px);
-  z-index: 10;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(8px);
-  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
 }
 
 .playlist-header {
@@ -334,7 +337,8 @@ onBeforeUnmount(() => {
 }
 
 .playlist-scroll {
-  max-height: 220px;
+  @apply flex-1;
+  min-height: 0;
 }
 
 .playlist-list {
@@ -365,7 +369,7 @@ onBeforeUnmount(() => {
 
 .playlist-placeholder {
   overflow: hidden;
-  transition: height 0.3s ease;
+  transition: height 0.25s ease, padding-top 0.25s ease;
   min-height: 0;
 }
 
