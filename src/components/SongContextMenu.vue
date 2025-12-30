@@ -24,11 +24,17 @@ const emit = defineEmits<{
   (event: "play-next"): void;
   (event: "toggle-favorite"): void;
   (event: "add-to-playlist", payload: { playlistId: string }): void;
+  (event: "close"): void;
 }>();
 
 const playlists = usePlaylistsStore();
 const favorites = useFavoriteStore();
 const message = useMessage();
+
+// 检查 store 是否已初始化
+const isStoreReady = computed(() => {
+  return playlists.state && favorites.state;
+});
 
 function renderIcon(icon: Component, color = "#9ab4d8") {
   return () => h(NIcon, { size: 16, color }, { default: () => h(icon) });
@@ -37,20 +43,30 @@ function renderIcon(icon: Component, color = "#9ab4d8") {
 const dropdownOptions = computed<DropdownOption[]>(() => {
   if (!props.row) return [];
 
-  const isFav = favorites.isFavorite(props.row.id);
-
-  // 构建歌单子菜单选项
-  const playlistChildren = playlists.state.items.map((p) => ({
-    label: p.name,
-    key: `playlist:${p.id}`,
-  }));
-
-  // 如果没有歌单，就不显示"添加到"菜单
-  if (playlistChildren.length === 0) {
-    // 不添加任何选项，这样菜单中不会显示"添加到"
+  // 安全获取收藏状态，防止 store 未初始化
+  let isFav = false;
+  try {
+    if (favorites && favorites.isFavorite) {
+      isFav = favorites.isFavorite(props.row.id);
+    }
+  } catch (e) {
+    console.warn('Favorites store not available:', e);
   }
 
-  return [
+  // 安全获取歌单列表
+  let playlistChildren: DropdownOption[] = [];
+  try {
+    if (playlists && playlists.state && playlists.state.items) {
+      playlistChildren = playlists.state.items.map((p) => ({
+        label: p.name,
+        key: `playlist:${p.id}`,
+      }));
+    }
+  } catch (e) {
+    console.warn('Playlists store not available:', e);
+  }
+
+  const options: DropdownOption[] = [
     {
       label: "播放",
       key: "play",
@@ -67,13 +83,19 @@ const dropdownOptions = computed<DropdownOption[]>(() => {
       key: "favorite",
       icon: renderIcon(isFav ? Heart : HeartOutline, isFav ? "#ef4444" : "#9ab4d8"),
     },
-    {
+  ];
+
+  // 只有在有歌单时才显示"添加到"菜单
+  if (playlistChildren.length > 0) {
+    options.push({
       label: "添加到",
       key: "add-to",
       icon: renderIcon(AddOutline),
       children: playlistChildren,
-    },
-  ];
+    });
+  }
+
+  return options;
 });
 
 function handleMenuSelect(key: string | number) {

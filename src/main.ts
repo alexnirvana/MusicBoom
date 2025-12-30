@@ -5,6 +5,8 @@ import router from "./router";
 import { useAuthStore } from "./stores/auth";
 import { usePlayerStore } from "./stores/player";
 import "./style.css";
+import { RecycleScroller } from "vue-virtual-scroller";
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 
 async function bootstrap() {
   const { ready } = useAuthStore();
@@ -27,6 +29,7 @@ async function bootstrap() {
   const app = createApp(App);
   app.use(naive);
   app.use(router);
+  app.component("RecycleScroller", RecycleScroller);
   app.mount("#app");
 }
 

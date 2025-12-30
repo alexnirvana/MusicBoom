@@ -101,6 +101,22 @@ function handleContextMenu(event: MouseEvent, song: MiniTrack) {
   });
 }
 
+// 更多按钮点击处理
+function handleMoreButtonClick(event: MouseEvent, song: MiniTrack) {
+  event.preventDefault();
+  event.stopPropagation();
+  contextRow.value = song;
+  showContextMenu.value = false;
+  nextTick(() => {
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    contextMenuX.value = rect.left;
+    contextMenuY.value = rect.bottom + 4;
+    showContextMenu.value = true;
+    console.log('Context menu opened:', { x: contextMenuX.value, y: contextMenuY.value, song: song });
+  });
+}
+
 function handleMenuClickoutside() {
   showContextMenu.value = false;
 }
@@ -208,7 +224,17 @@ function toggleFavorite() {
 
 function handlePlayById(id: string) {
   console.log("Playing song:", id);
-  sendCommand("play-by-id", { songId: id });
+  // 如果点击的是当前歌曲，切换播放/暂停状态
+  if (id === miniState.track?.id) {
+    // 立即更新本地状态以提供即时反馈
+    pendingPlayState.value = !miniState.isPlaying;
+    miniState.isPlaying = pendingPlayState.value;
+    sendCommand("toggle-play");
+  } else {
+    // 如果点击的是其他歌曲，播放该歌曲并设置为正在播放状态
+    miniState.isPlaying = true;
+    sendCommand("play-by-id", { songId: id });
+  }
 }
 
 async function restoreMainWindow() {
@@ -357,10 +383,14 @@ watch(
       <transition name="playlist-fade">
         <div v-if="playlistOpen" class="playlist-panel">
           <div class="playlist-scroll">
-            <ul class="playlist-list">
-              <li
-                v-for="item in miniState.playlist"
-                :key="item.id"
+            <RecycleScroller
+              class="playlist-list"
+              :items="miniState.playlist"
+              :item-size="56"
+              key-field="id"
+              v-slot="{ item }"
+            >
+              <div
                 class="playlist-item"
                 :class="{ active: miniState.track?.id === item.id }"
                 @click="handlePlayById(item.id)"
@@ -374,17 +404,17 @@ watch(
                   <n-button
                     quaternary
                     circle
-                    size="small"
+                    size="tiny"
                     class="action-btn"
-                    title="播放"
+                    :title="miniState.track?.id === item.id && miniState.isPlaying ? '暂停' : '播放'"
                     @click.stop="handlePlayById(item.id)"
                   >
-                    <n-icon :component="PlayCircle" size="16" />
+                    <n-icon :component="miniState.track?.id === item.id && miniState.isPlaying ? PauseCircle : PlayCircle" size="14" />
                   </n-button>
                   <n-button
                     quaternary
                     circle
-                    size="small"
+                    size="tiny"
                     class="action-btn"
                     :title="miniState.favoriteIds.has(item.id) ? '取消收藏' : '收藏'"
                     @click.stop="toggleSongFavorite(item)"
@@ -392,57 +422,54 @@ watch(
                     <n-icon
                       :component="miniState.favoriteIds.has(item.id) ? HeartSharp : HeartOutline"
                       :color="miniState.favoriteIds.has(item.id) ? '#ef4444' : '#9ab4d8'"
-                      size="16"
+                      size="14"
                     />
                   </n-button>
                   <n-button
+                    ref="moreButtonRefs"
                     quaternary
                     circle
-                    size="small"
+                    size="tiny"
                     class="action-btn"
                     title="更多"
-                    @click.stop="handleContextMenu($event, item)"
+                    @click.stop="(e) => handleMoreButtonClick(e, item)"
                   >
-                    <n-icon :component="EllipsisHorizontal" size="16" />
+                    <n-icon :component="EllipsisHorizontal" size="14" />
                   </n-button>
                 </div>
-              </li>
-            </ul>
+              </div>
+            </RecycleScroller>
           </div>
         </div>
       </transition>
-      <!-- 右键菜单 -->
-      <n-dropdown
-        trigger="manual"
-        placement="bottom-start"
-        :x="contextMenuX"
-        :y="contextMenuY"
-        :show="showContextMenu"
-        :options="[]"
-        :scrollable="true"
-        @clickoutside="handleMenuClickoutside"
-      >
-        <template #default>
-          <song-context-menu
-            :row="contextRow"
-            @play="handleMenuSelect('play')"
-            @play-next="handleMenuSelect('play-next')"
-            @toggle-favorite="handleMenuSelect('favorite')"
-            @add-to-playlist="handleAddToPlaylist"
-          >
-            <template #default="{ options, onSelect }">
-              <n-dropdown
-                trigger="manual"
-                placement="bottom-start"
-                :show="true"
-                :options="options"
-                @select="onSelect"
-              />
-            </template>
-          </song-context-menu>
-        </template>
-      </n-dropdown>
     </div>
+    <!-- 右键菜单 -->
+    <n-dropdown
+      trigger="manual"
+      placement="bottom-start"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :show="showContextMenu"
+      :scrollable="true"
+      @clickoutside="handleMenuClickoutside"
+    >
+      <template #default>
+        <song-context-menu
+          :row="contextRow"
+          @play="handleMenuSelect('play')"
+          @play-next="handleMenuSelect('play-next')"
+          @toggle-favorite="handleMenuSelect('favorite')"
+          @add-to-playlist="handleAddToPlaylist"
+        >
+          <template #default="{ options, onSelect }">
+            <n-dropdown
+              :options="options"
+              @select="onSelect"
+            />
+          </template>
+        </song-context-menu>
+      </template>
+    </n-dropdown>
   </div>
 </template>
 
@@ -605,49 +632,55 @@ watch(
 }
 
 .playlist-scroll {
-  @apply flex-1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 4px;
-  max-height: 336px; /* 窗口最大高度480 - 播放器卡片高度约80 - 内边距24 = 336px */
-  min-height: 0;
+  overflow: hidden;
+  height: 336px;
+  width: 100%;
 }
 
 /* 自定义滚动条样式 */
-.playlist-scroll::-webkit-scrollbar {
+.playlist-scroll ::-webkit-scrollbar {
   width: 6px;
 }
 
-.playlist-scroll::-webkit-scrollbar-track {
+.playlist-scroll ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 3px;
 }
 
-.playlist-scroll::-webkit-scrollbar-thumb {
+.playlist-scroll ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 3px;
   transition: background 0.2s;
 }
 
-.playlist-scroll::-webkit-scrollbar-thumb:hover {
+.playlist-scroll ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
 .playlist-list {
   @apply m-0 list-none p-0;
   width: 100%;
-  display: flex;
-  flex-direction: column;
+  height: 100%;
+}
+
+.vue-recycle-scroller__item-view {
+  width: 100%;
+  height: 56px;
+}
+
+.vue-recycle-scroller__item-wrapper {
+  height: 56px;
 }
 
 .playlist-item {
-  @apply cursor-pointer px-3 py-2 transition-all;
+  @apply cursor-pointer px-3 transition-all;
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   align-items: center;
   width: 100%;
   gap: 8px;
   border-radius: 8px;
+  height: 56px;
 }
 
 .playlist-item:hover {
@@ -659,15 +692,23 @@ watch(
 }
 
 .song-title {
-  @apply block truncate text-sm text-white;
+  @apply block text-sm text-white;
   flex: 1;
   min-width: 0;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .song-artist {
-  @apply block truncate text-xs text-[#c6cfe0];
+  @apply block text-xs text-[#c6cfe0];
   flex: 1;
   min-width: 0;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .song-actions {
@@ -684,9 +725,11 @@ watch(
 }
 
 .action-btn {
-  @apply grid h-8 w-8 place-items-center rounded-full;
+  @apply grid place-items-center rounded-full;
+  width: 24px;
+  height: 24px;
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: none;
   color: #e9eefb;
   transition: all 0.2s;
   pointer-events: auto;
@@ -715,5 +758,14 @@ watch(
 .playlist-fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+/* 确保 n-dropdown 在最上层 */
+:deep(.n-dropdown-menu) {
+  z-index: 1000 !important;
+}
+
+:deep(.n-dropdown) {
+  z-index: 1000 !important;
 }
 </style>
