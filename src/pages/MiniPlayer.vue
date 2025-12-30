@@ -12,7 +12,7 @@ import {
   PlaySkipForwardSharp,
   CloseOutline,
 } from "@vicons/ionicons5";
-import { NIcon, NScrollbar } from "naive-ui";
+import { NButton, NIcon, NScrollbar } from "naive-ui";
 
 type MiniTrack = {
   id: string;
@@ -42,6 +42,16 @@ const miniState = reactive<{
 });
 
 const actionVisible = ref(false);
+
+function handleMouseEnter() {
+  console.log('Mouse enter shell', actionVisible.value);
+  actionVisible.value = true;
+}
+
+function handleMouseLeave() {
+  console.log('Mouse leave shell', actionVisible.value);
+  actionVisible.value = false;
+}
 const playlistOpen = ref(false);
 const unlistenState = ref<(() => void) | null>(null);
 const pendingPlayState = ref<boolean | null>(null);
@@ -137,6 +147,12 @@ onMounted(async () => {
   await setupStateListener();
   requestState();
   await resizeWindowToContent();
+
+  // 阻止双击窗口默认行为（防止最大化/还原）
+  document.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, { capture: true });
 });
 
 onBeforeUnmount(() => {
@@ -159,9 +175,11 @@ watch(
 
 <template>
   <div
-    class="mini-shell app-drag"
+    class="mini-shell"
     :class="{ 'playlist-expanded': playlistOpen }"
     ref="shellRef"
+    @mouseenter="handleMouseEnter"
+    @mouseleave="handleMouseLeave"
   >
     <div class="mini-card">
       <div class="cover-wrap">
@@ -175,60 +193,70 @@ watch(
         />
       </div>
 
-      <div class="info-area app-no-drag" @mouseenter.stop="actionVisible = true" @mouseleave.stop="actionVisible = false">
-        <div v-show="!actionVisible" class="title-block app-no-drag">
+      <div class="info-area">
+        <div v-show="!actionVisible" class="title-block">
           <p class="title">{{ displayTitle }}</p>
           <p class="artist">{{ displayArtist }}</p>
         </div>
 
-        <div v-show="actionVisible" class="actions app-no-drag">
-          <button class="icon-btn" :class="{ active: isFavorite }" :title="isFavorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
+        <div v-show="actionVisible" class="actions">
+          <n-button quaternary circle size="small" class="icon-btn" :class="{ active: isFavorite }" :title="isFavorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
             <n-icon :component="isFavorite ? HeartSharp : HeartOutline" />
-          </button>
-          <button class="icon-btn" title="上一首" @click="sendCommand('prev')">
+          </n-button>
+          <n-button quaternary circle size="small" class="icon-btn" title="上一首" @click="sendCommand('prev')">
             <n-icon :component="PlaySkipBackSharp" />
-          </button>
-          <button class="icon-btn play" :title="miniState.isPlaying ? '暂停' : '播放'" @click="sendCommand('toggle-play')">
+          </n-button>
+          <n-button quaternary circle size="medium" class="icon-btn play" :title="miniState.isPlaying ? '暂停' : '播放'" @click="sendCommand('toggle-play')">
             <n-icon :component="miniState.isPlaying ? PauseCircle : PlayCircle" />
-          </button>
-          <button class="icon-btn" title="下一首" @click="sendCommand('next')">
-            <n-icon :component="PlaySkipForwardSharp" />
-          </button>
-          <button
-            class="icon-btn playlist-indicator app-no-drag"
+          </n-button>
+          <n-button quaternary circle size="small" class="icon-btn" title="下一首" @click="sendCommand('next')">
+            <n-icon :component="PlaySkipForwardSharp"/>
+          </n-button>
+          <n-button
+            quaternary
+            circle
+            size="small"
+            class="icon-btn playlist-indicator"
             :class="{ active: playlistOpen }"
             :title="playlistOpen ? '收起播放列表' : '播放列表'"
             @click="playlistOpen = !playlistOpen"
           >
             <n-icon :component="ListOutline" />
-          </button>
-          <button class="icon-btn close-btn app-no-drag" title="返回主界面" @click="restoreMainWindow">
-            <n-icon :component="CloseOutline" />
-          </button>
+          </n-button>
         </div>
       </div>
+
+      <n-button
+        v-show="actionVisible"
+        quaternary
+        circle
+        size="tiny"
+        class="close-btn"
+        title="返回主界面"
+        @click="restoreMainWindow"
+      >
+        <n-icon :component="CloseOutline" />
+      </n-button>
     </div>
 
     <div
-      class="playlist-placeholder app-no-drag"
+      class="playlist-placeholder"
       :style="{
-        flex: playlistOpen ? '1 1 0%' : '0 0 auto',
-        height: playlistOpen ? 'auto' : '0px',
+        display: playlistOpen ? 'flex' : 'none',
         paddingTop: playlistOpen ? '8px' : '0px'
       }"
     >
       <transition name="playlist-fade">
-        <div v-if="playlistOpen" class="playlist-panel app-no-drag">
+        <div v-if="playlistOpen" class="playlist-panel">
           <div class="playlist-header">
             <span class="label">播放列表</span>
-            <button class="toggle-btn" @click="playlistOpen = false">收起</button>
           </div>
           <n-scrollbar class="playlist-scroll">
             <ul class="playlist-list">
               <li
                 v-for="item in miniState.playlist"
                 :key="item.id"
-                class="playlist-item app-no-drag"
+                class="playlist-item"
                 :class="{ active: miniState.track?.id === item.id }"
                 @click="handlePlayById(item.id)"
               >
@@ -248,6 +276,7 @@ watch(
   @apply relative flex w-full flex-col;
   padding: 0;
   background: transparent;
+  -webkit-app-region: drag;
 }
 
 .mini-shell.playlist-expanded {
@@ -255,16 +284,21 @@ watch(
 }
 
 .mini-card {
-  @apply relative flex h-auto w-full items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
+  @apply relative flex h-auto w-full items-center gap-3  bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
   background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%),
     rgba(10, 14, 20, 0.94);
   flex-shrink: 0;
+  max-width: 100%;
+  margin: 0 auto;
+  user-select: none;
 }
 
 .cover-wrap {
   @apply flex-shrink-0;
+  user-select: none;
+  -webkit-app-region: no-drag;
 }
 
 .cover-img {
@@ -277,10 +311,20 @@ watch(
 
 .info-area {
   @apply flex-1 overflow-hidden;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  -webkit-app-region: no-drag;
 }
 
 .title-block {
   cursor: default;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  user-select: none;
 }
 
 .title {
@@ -293,6 +337,7 @@ watch(
 
 .actions {
   @apply flex items-center gap-2 transition-opacity duration-200;
+  -webkit-app-region: no-drag;
 }
 
 .icon-btn {
@@ -336,9 +381,12 @@ watch(
 }
 
 .close-btn {
+  @apply absolute right-4 top-3 h-8 w-8;
   background: rgba(255, 255, 255, 0.04);
   color: #e9eefb;
   transition: all 0.2s ease;
+  z-index: 10;
+  -webkit-app-region: no-drag;
 }
 
 .close-btn:hover {
@@ -357,18 +405,15 @@ watch(
   backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
+  -webkit-app-region: no-drag;
 }
 
 .playlist-header {
-  @apply mb-2 flex items-center justify-between;
+  @apply mb-2 flex items-center;
 }
 
 .playlist-header .label {
   @apply text-sm text-[#9eb5d6];
-}
-
-.toggle-btn {
-  @apply rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-[#e9eefb];
 }
 
 .playlist-scroll {
@@ -407,6 +452,7 @@ watch(
   overflow: hidden;
   transition: height 0.25s ease, padding-top 0.25s ease;
   min-height: 0;
+  -webkit-app-region: no-drag;
 }
 
 .playlist-fade-enter-active,

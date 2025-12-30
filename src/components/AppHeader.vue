@@ -31,7 +31,7 @@ const checkStateDebounced = () => {
 async function openMiniPlayer() {
   if (creatingMiniWindow.value) return;
   creatingMiniWindow.value = true;
-  const miniWidth = 520;
+  const miniWidth = 360;
   const miniHeight = 220;
   const targetSize = new LogicalSize(miniWidth, miniHeight);
 
