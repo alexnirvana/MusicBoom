@@ -44,6 +44,7 @@ const miniState = reactive<{
 const actionVisible = ref(false);
 const playlistOpen = ref(false);
 const unlistenState = ref<(() => void) | null>(null);
+const pendingPlayState = ref<boolean | null>(null);
 
 const displayTitle = computed(() => miniState.track?.title || "尚未播放");
 const displayArtist = computed(() => miniState.track?.artist || "等待下一首");
@@ -56,12 +57,18 @@ const isFavorite = computed(() => {
 async function sendCommand(type: string, payload?: Record<string, unknown>) {
   try {
     if (type === "toggle-play" && miniState.track) {
-      // 本地先行切换播放态，避免等待主窗口广播时按钮闪回
-      miniState.isPlaying = !miniState.isPlaying;
+      // 本地记录期望的播放态，先行更新按钮，等待主窗口回传后再校正
+      const target = !miniState.isPlaying;
+      pendingPlayState.value = target;
+      miniState.isPlaying = target;
     }
     await emit("player:command", { type, ...payload });
   } catch (error) {
     console.error("发送控制指令失败:", error);
+    // 指令失败时清理预期态，避免卡死在错误的按钮状态上
+    if (type === "toggle-play") {
+      pendingPlayState.value = null;
+    }
   }
 }
 
@@ -95,6 +102,13 @@ async function setupStateListener() {
     miniState.track = payload.track || null;
     miniState.playlist = payload.playlist || [];
     miniState.isPlaying = payload.isPlaying;
+    // 当主窗口状态与期望一致时，清理预期标记
+    if (pendingPlayState.value !== null && payload.isPlaying === pendingPlayState.value) {
+      pendingPlayState.value = null;
+    } else if (pendingPlayState.value !== null && payload.isPlaying !== pendingPlayState.value) {
+      // 主窗口回传与期望不符，也需要释放预期标记，避免状态长时间悬挂
+      pendingPlayState.value = null;
+    }
     miniState.progress = payload.progress;
     miniState.duration = payload.duration;
     miniState.playSource = payload.playSource;
@@ -132,7 +146,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="info-area app-no-drag">
-        <div class="title-block app-no-drag" @click="restoreMainWindow">
+        <div class="title-block app-no-drag">
           <p class="title">{{ displayTitle }}</p>
           <p class="artist">{{ displayArtist }}</p>
         </div>
@@ -188,19 +202,18 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mini-shell {
-  @apply h-full w-full flex items-center justify-center rounded-2xl;
-  background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%), rgba(10, 14, 20, 0.92);
+  @apply relative h-full w-full overflow-hidden;
   padding: 0;
-  backdrop-filter: blur(14px);
-  overflow: hidden;
+  background: transparent;
 }
 
 .mini-card {
-  @apply relative flex items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl w-full;
+  @apply relative flex h-full w-full items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
   min-height: 140px;
-  border-radius: 20px;
+  background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%),
+    rgba(10, 14, 20, 0.94);
 }
 
 .cover-wrap {
@@ -220,7 +233,7 @@ onBeforeUnmount(() => {
 }
 
 .title-block {
-  cursor: pointer;
+  cursor: default;
 }
 
 .title {
@@ -266,7 +279,13 @@ onBeforeUnmount(() => {
 }
 
 .playlist-panel {
-  @apply mt-3 w-full max-w-xl rounded-2xl bg-[#1c1f26]/95 p-3 shadow-lg;
+  @apply max-w-xl rounded-2xl bg-[#1c1f26]/95 p-3 shadow-lg;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: calc(100% - 24px);
+  z-index: 10;
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(8px);
 }
