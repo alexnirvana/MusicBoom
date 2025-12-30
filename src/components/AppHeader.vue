@@ -52,7 +52,7 @@ async function openMiniPlayer() {
         resizable: false,
         visible: false,
         transparent: true,
-        alwaysOnTop: true,
+        alwaysOnTop: false,
         skipTaskbar: true,
         focus: true,
         center: !targetPosition,

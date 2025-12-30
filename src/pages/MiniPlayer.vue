@@ -287,7 +287,8 @@ watch(
   padding: 0;
   background: transparent;
   -webkit-app-region: drag;
-  overflow: visible;
+  overflow: hidden;
+  border-radius: 16px;
 }
 
 .drag-region {
@@ -314,6 +315,7 @@ watch(
   max-width: 100%;
   margin: 0 auto;
   user-select: none;
+  border-radius: 16px;
 }
 
 .mini-shell.playlist-expanded .mini-card {
@@ -499,6 +501,7 @@ watch(
   transition: height 0.25s ease;
   min-height: 0;
   -webkit-app-region: no-drag;
+  border-radius: 0 0 16px 16px;
 }
 
 .playlist-fade-enter-active,
