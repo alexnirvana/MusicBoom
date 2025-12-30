@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, nextTick, ref, watch, h } from "vue";
 import type { Component } from "vue";
 import { useMessage } from "naive-ui";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   DownloadOutline,
   EllipsisHorizontal,
@@ -37,6 +39,9 @@ const message = useMessage();
 const playlistPanelRef = ref<InstanceType<typeof PlaylistNotification> | null>(null);
 const playerBarRef = ref<HTMLElement | null>(null);
 const router = useRouter();
+const commandUnlisten = ref<UnlistenFn | null>(null);
+const stateRequestUnlisten = ref<UnlistenFn | null>(null);
+const miniWatchStop = ref<null | (() => void)>(null);
 
 // 记录播放器高度，便于其他组件（如播放列表）计算可用空间
 const updatePlayerHeight = () => {
@@ -47,10 +52,16 @@ const updatePlayerHeight = () => {
 onMounted(() => {
   nextTick(updatePlayerHeight);
   window.addEventListener("resize", updatePlayerHeight);
+  setupMiniBridge().catch((error) => {
+    console.warn("初始化精简模式桥接失败", error);
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updatePlayerHeight);
+  commandUnlisten.value?.();
+  stateRequestUnlisten.value?.();
+  miniWatchStop.value?.();
 });
 
 // 收藏态：根据当前歌曲动态判断，并在切换时刷新
@@ -308,6 +319,95 @@ watch(
     }
   }
 );
+
+// 生成迷你窗口所需的序列化播放状态
+const miniState = computed(() => {
+  const track = player.currentTrack.value;
+  return {
+    track: track
+      ? {
+          id: track.id,
+          title: track.title,
+          artist: track.artist,
+          coverUrl: coverUrl.value,
+          album: track.album,
+        }
+      : null,
+    isPlaying: player.state.isPlaying,
+    progress: player.state.progress,
+    duration: player.state.duration,
+    playlist: player.state.playlist.map((item) => ({
+      id: item.id,
+      title: item.title,
+      artist: item.artist,
+      coverUrl: item.coverUrl,
+    })),
+    favoriteIds: Array.from(favorites.state.favoriteIds),
+    playSource: player.state.playSource,
+    loading: player.state.loading,
+  };
+});
+
+// 将播放状态广播给精简模式窗口
+async function emitMiniState() {
+  try {
+    await emit("player:state", miniState.value);
+  } catch (error) {
+    console.warn("广播迷你窗口状态失败", error);
+  }
+}
+
+// 处理来自精简模式的指令
+async function handleMiniCommand(payload: { type: string; songId?: string }) {
+  switch (payload.type) {
+    case "toggle-play":
+      await player.togglePlay();
+      break;
+    case "next":
+      player.playNext();
+      break;
+    case "prev":
+      player.playPrev();
+      break;
+    case "toggle-favorite":
+      await toggleFavorite();
+      break;
+    case "play-by-id":
+      if (payload.songId) {
+        await handlePlayFromPlaylist(payload.songId);
+      }
+      break;
+    default:
+      break;
+  }
+  await emitMiniState();
+}
+
+// 监听精简模式事件，启动与销毁时清理
+async function setupMiniBridge() {
+  await emitMiniState();
+  commandUnlisten.value = await listen("player:command", async (event) => {
+    await handleMiniCommand(event.payload as { type: string; songId?: string });
+  });
+
+  stateRequestUnlisten.value = await listen("player:state-request", emitMiniState);
+
+  miniWatchStop.value = watch(
+    () => [
+      player.currentTrack.value?.id,
+      player.state.isPlaying,
+      player.state.progress,
+      player.state.duration,
+      player.state.playlist.map((item) => item.id).join(","),
+      favorites.state.refreshCounter,
+      player.state.playSource,
+      player.state.loading,
+    ],
+    () => {
+      emitMiniState();
+    }
+  );
+}
 </script>
 
 <template>

@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  CloseOutline,
-  CopyOutline,
-  RemoveOutline,
-  SearchOutline,
-  SquareOutline,
-} from "@vicons/ionicons5";
+import { CloseOutline, CopyOutline, LeafOutline, RemoveOutline, SearchOutline, SquareOutline } from "@vicons/ionicons5";
 import { NButton, NIcon, NInput } from "naive-ui";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { sendNotification } from "@tauri-apps/plugin-notification";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import UserMenu from "./UserMenu.vue";
+import { calcMiniPosition, ensureNotifyPermission } from "../utils/mini-player-bridge";
 
 // 窗口控制按钮配置，实时切换最大化按钮的图标
 const currentWindow = getCurrentWindow();
 const isMaximized = ref(false);
 const resizeUnlisten = ref<UnlistenFn | null>(null);
+const creatingMiniWindow = ref(false);
 
 const updateMaximizedState = async () => {
   try {
@@ -28,6 +26,63 @@ const updateMaximizedState = async () => {
 const checkStateDebounced = () => {
   setTimeout(updateMaximizedState, 100);
 };
+
+// 切换到精简模式：隐藏当前窗口并唤起迷你窗口
+async function openMiniPlayer() {
+  if (creatingMiniWindow.value) return;
+  creatingMiniWindow.value = true;
+  const miniWidth = 440;
+  const miniHeight = 170;
+
+  try {
+    const existing = await WebviewWindow.getByLabel("mini-player");
+    if (existing) {
+      await existing.show();
+      await existing.setFocus();
+    } else {
+      const targetPosition = await calcMiniPosition(miniWidth, miniHeight);
+      const mini = new WebviewWindow("mini-player", {
+        url: "/mini.html",
+        title: "精简模式",
+        width: miniWidth,
+        height: miniHeight,
+        decorations: false,
+        resizable: false,
+        visible: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        focus: true,
+        center: !targetPosition,
+        x: targetPosition?.x,
+        y: targetPosition?.y,
+        shadow: true,
+      });
+
+      mini.once("tauri://created", async () => {
+        await mini.show();
+        await mini.setFocus();
+      });
+
+      mini.once("tauri://error", (event) => {
+        console.error("创建精简模式窗口失败", event);
+      });
+    }
+
+    await currentWindow.hide();
+
+    if (await ensureNotifyPermission()) {
+      await sendNotification({
+        title: "已进入精简模式",
+        body: "窗口已缩小到右下角，点击即可恢复全功能界面",
+      });
+    }
+  } catch (error) {
+    console.error("切换精简模式失败", error);
+  } finally {
+    creatingMiniWindow.value = false;
+  }
+}
 
 onMounted(async () => {
   await updateMaximizedState();
@@ -43,6 +98,7 @@ onUnmounted(() => {
 });
 
 const windowActions = computed(() => [
+  { icon: LeafOutline, title: "精简模式", onClick: openMiniPlayer, loading: creatingMiniWindow.value },
   { icon: RemoveOutline, title: "最小化", onClick: () => currentWindow.minimize() },
   {
     icon: isMaximized.value ? CopyOutline : SquareOutline,
@@ -83,6 +139,7 @@ const windowActions = computed(() => [
           size="small"
           class="window-control"
           :title="item.title"
+          :loading="item.loading"
           @click="item.onClick()"
         >
           <n-icon :component="item.icon" />
