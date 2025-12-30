@@ -17,6 +17,7 @@
   html,
   body,
   #app,
+  #mini-app,
   .n-config-provider {
     @apply h-full w-full overflow-hidden;
   }
