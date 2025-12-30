@@ -4,7 +4,8 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "auth"
+    "auth",
+    "mini-player"
   ],
   "permissions": [
     "core:path:default",
@@ -225,6 +226,7 @@
     "sql:allow-select",
     "sql:allow-execute",
     "store:default",
+    "core:event:allow-emit",
     "core:event:allow-unlisten",
     "core:window:allow-minimize",
     "core:window:allow-start-dragging",

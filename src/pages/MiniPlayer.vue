@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="mini-shell"
+    class="mini-shell app-drag"
     @mouseenter="actionVisible = true"
     @mouseleave="actionVisible = false"
   >
@@ -127,13 +127,13 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="info-area">
-        <div class="title-block" @click="restoreMainWindow">
+      <div class="info-area app-no-drag">
+        <div class="title-block app-no-drag" @click="restoreMainWindow">
           <p class="title">{{ displayTitle }}</p>
           <p class="artist">{{ displayArtist }}</p>
         </div>
 
-        <div class="actions" :class="{ visible: actionVisible }">
+        <div class="actions app-no-drag" :class="{ visible: actionVisible }">
           <button class="icon-btn" :class="{ active: isFavorite }" :title="isFavorite ? '取消收藏' : '收藏'" @click="toggleFavorite">
             <n-icon :component="isFavorite ? HeartSharp : HeartOutline" />
           </button>
@@ -152,13 +152,13 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <button class="icon-btn close-btn" title="返回主界面" @click="restoreMainWindow">
+      <button class="icon-btn close-btn app-no-drag" title="返回主界面" @click="restoreMainWindow">
         <n-icon :component="CloseOutline" />
       </button>
     </div>
 
     <transition name="playlist-fade">
-      <div v-if="playlistOpen" class="playlist-panel">
+      <div v-if="playlistOpen" class="playlist-panel app-no-drag">
         <div class="playlist-header">
           <span class="label">播放列表</span>
           <button class="toggle-btn" @click="playlistOpen = false">收起</button>
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
             <li
               v-for="item in miniState.playlist"
               :key="item.id"
-              class="playlist-item"
+              class="playlist-item app-no-drag"
               :class="{ active: miniState.track?.id === item.id }"
               @click="handlePlayById(item.id)"
             >
@@ -184,14 +184,18 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mini-shell {
-  @apply h-screen w-screen flex items-start justify-center bg-transparent;
+  @apply h-full w-full flex items-center justify-center;
+  background: radial-gradient(circle at 20% 20%, rgba(41, 51, 73, 0.65), transparent 55%), rgba(10, 14, 20, 0.92);
+  padding: 10px;
+  backdrop-filter: blur(14px);
+  border-radius: 18px;
 }
 
 .mini-card {
-  @apply relative flex items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl;
+  @apply relative flex items-center gap-3 rounded-2xl bg-[#1c1f26]/95 px-4 py-3 shadow-2xl w-full;
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(8px);
-  min-width: 360px;
+  min-height: 140px;
 }
 
 .cover-wrap {
