@@ -5,7 +5,7 @@ import { NButton, NIcon, NInput } from "naive-ui";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import UserMenu from "./UserMenu.vue";
 import { calcMiniPosition, ensureNotifyPermission } from "../utils/mini-player-bridge";
 
@@ -31,12 +31,14 @@ const checkStateDebounced = () => {
 async function openMiniPlayer() {
   if (creatingMiniWindow.value) return;
   creatingMiniWindow.value = true;
-  const miniWidth = 440;
-  const miniHeight = 170;
+  const miniWidth = 520;
+  const miniHeight = 220;
+  const targetSize = new LogicalSize(miniWidth, miniHeight);
 
   try {
     const existing = await WebviewWindow.getByLabel("mini-player");
     if (existing) {
+      await existing.setSize(targetSize);
       await existing.show();
       await existing.setFocus();
     } else {

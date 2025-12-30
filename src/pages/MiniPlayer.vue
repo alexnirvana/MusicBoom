@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   HeartOutline,
   HeartSharp,
@@ -45,6 +45,8 @@ const actionVisible = ref(false);
 const playlistOpen = ref(false);
 const unlistenState = ref<(() => void) | null>(null);
 const pendingPlayState = ref<boolean | null>(null);
+const shellRef = ref<HTMLElement | null>(null);
+const miniWindow = getCurrentWindow();
 
 const displayTitle = computed(() => miniState.track?.title || "尚未播放");
 const displayArtist = computed(() => miniState.track?.artist || "等待下一首");
@@ -69,6 +71,19 @@ async function sendCommand(type: string, payload?: Record<string, unknown>) {
     if (type === "toggle-play") {
       pendingPlayState.value = null;
     }
+  }
+}
+
+// 根据实际内容高度动态调整精简模式窗口，避免出现多余透明区域或内容被裁切
+async function resizeWindowToContent() {
+  await nextTick();
+  const shell = shellRef.value;
+  if (!shell) return;
+  const rect = shell.getBoundingClientRect();
+  try {
+    await miniWindow.setSize(new LogicalSize(Math.ceil(rect.width), Math.ceil(rect.height)));
+  } catch (error) {
+    console.error("调整精简窗口尺寸失败:", error);
   }
 }
 
@@ -121,17 +136,32 @@ onMounted(async () => {
   console.log("MiniPlayer onMounted, actionVisible initial:", actionVisible.value);
   await setupStateListener();
   requestState();
+  await resizeWindowToContent();
 });
 
 onBeforeUnmount(() => {
   unlistenState.value?.();
 });
+
+watch(playlistOpen, () => {
+  resizeWindowToContent();
+});
+
+watch(
+  () => miniState.playlist.length,
+  () => {
+    if (playlistOpen.value) {
+      resizeWindowToContent();
+    }
+  }
+);
 </script>
 
 <template>
   <div
     class="mini-shell app-drag"
     :class="{ 'playlist-expanded': playlistOpen }"
+    ref="shellRef"
   >
     <div class="mini-card">
       <div class="cover-wrap">
@@ -218,7 +248,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .mini-shell {
-  @apply relative flex h-full w-full flex-col;
+  @apply relative flex w-full flex-col;
   padding: 0;
   background: transparent;
 }
@@ -317,6 +347,7 @@ onBeforeUnmount(() => {
   @apply max-w-xl rounded-2xl bg-[#1c1f26]/95 p-3 shadow-lg;
   width: 100%;
   height: 100%;
+  max-height: 360px;
   z-index: 1;
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(8px);
@@ -339,6 +370,7 @@ onBeforeUnmount(() => {
 .playlist-scroll {
   @apply flex-1;
   min-height: 0;
+  max-height: 280px;
 }
 
 .playlist-list {
