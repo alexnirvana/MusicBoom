@@ -3,9 +3,11 @@ import { NConfigProvider, NDialogProvider, NGlobalStyle, NMessageProvider, NNoti
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterView } from "./utils/router-lite";
 import { appTheme, appThemeOverrides } from "./theme";
+import { initMiniPlayerBridge } from "./utils/mini-player-bridge";
 
 // 记录当前内容区的刷新标记，拦截 F5 时仅刷新页面组件而不重载整个应用
 const viewRefreshKey = ref(0);
+const stopMiniBridge = ref<() => void>(() => {});
 
 function handleSoftRefresh(event: KeyboardEvent) {
   if (event.key !== "F5") return;
@@ -15,10 +17,14 @@ function handleSoftRefresh(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener("keydown", handleSoftRefresh);
+  initMiniPlayerBridge().then((stop) => {
+    stopMiniBridge.value = stop;
+  });
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleSoftRefresh);
+  stopMiniBridge.value?.();
 });
 </script>
 
