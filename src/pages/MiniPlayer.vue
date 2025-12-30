@@ -11,8 +11,10 @@ import {
   PlaySkipBackSharp,
   PlaySkipForwardSharp,
   CloseOutline,
+  EllipsisHorizontal,
 } from "@vicons/ionicons5";
-import { NButton, NIcon } from "naive-ui";
+import { NButton, NIcon, NDropdown } from "naive-ui";
+import SongContextMenu from "../components/SongContextMenu.vue";
 
 type MiniTrack = {
   id: string;
@@ -48,6 +50,15 @@ const pendingPlayState = ref<boolean | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
 const miniWindow = getCurrentWindow();
 
+// 播放列表hover状态
+const hoveredSongId = ref<string | null>(null);
+
+// 右键菜单
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextRow = ref<MiniTrack | null>(null);
+
 const displayTitle = computed(() => miniState.track?.title || "尚未播放");
 const displayArtist = computed(() => miniState.track?.artist || "等待下一首");
 const isFavorite = computed(() => {
@@ -65,6 +76,89 @@ function handleMouseEnter() {
 
 function handleMouseLeave() {
   setActionVisible(false);
+  hoveredSongId.value = null;
+}
+
+// 播放列表hover处理
+function handleSongHover(songId: string) {
+  hoveredSongId.value = songId;
+}
+
+function handleSongLeave() {
+  hoveredSongId.value = null;
+}
+
+// 右键菜单处理
+function handleContextMenu(event: MouseEvent, song: MiniTrack) {
+  event.preventDefault();
+  event.stopPropagation();
+  contextRow.value = song;
+  showContextMenu.value = false;
+  nextTick(() => {
+    contextMenuX.value = event.clientX;
+    contextMenuY.value = event.clientY;
+    showContextMenu.value = true;
+  });
+}
+
+function handleMenuClickoutside() {
+  showContextMenu.value = false;
+}
+
+function handleMenuSelect(key: string | number) {
+  showContextMenu.value = false;
+  const target = contextRow.value;
+  if (!target) return;
+
+  if (key === "play") {
+    handlePlayById(target.id);
+    return;
+  }
+
+  if (key === "play-next") {
+    // 查找当前歌曲在列表中的位置
+    const index = miniState.playlist.findIndex((s) => s.id === target.id);
+    if (index !== -1 && index < miniState.playlist.length - 1) {
+      const nextSong = miniState.playlist[index + 1];
+      handlePlayById(nextSong.id);
+    }
+    return;
+  }
+
+  if (key === "favorite") {
+    toggleSongFavorite(target);
+    return;
+  }
+}
+
+function handleAddToPlaylist(payload: { playlistId: string }) {
+  const target = contextRow.value;
+  if (!target) return;
+
+  // 转换 MiniTrack 为完整歌曲信息（如果有的话）
+  const songWithAlbum = {
+    ...target,
+    album: '',
+    duration: 0,
+    created: undefined,
+  };
+
+  sendCommand("add-to-playlist", {
+    songId: target.id,
+    playlistId: payload.playlistId,
+    song: songWithAlbum,
+  });
+}
+
+function toggleSongFavorite(song: MiniTrack) {
+  const isFav = miniState.favoriteIds.has(song.id);
+  if (isFav) {
+    miniState.favoriteIds.delete(song.id);
+    sendCommand("toggle-favorite", { songId: song.id, remove: true });
+  } else {
+    miniState.favoriteIds.add(song.id);
+    sendCommand("toggle-favorite", { songId: song.id, add: true });
+  }
 }
 
 // 向主窗口发送指令
@@ -113,6 +207,7 @@ function toggleFavorite() {
 }
 
 function handlePlayById(id: string) {
+  console.log("Playing song:", id);
   sendCommand("play-by-id", { songId: id });
 }
 
@@ -269,14 +364,84 @@ watch(
                 class="playlist-item"
                 :class="{ active: miniState.track?.id === item.id }"
                 @click="handlePlayById(item.id)"
+                @mouseenter="handleSongHover(item.id)"
+                @mouseleave="handleSongLeave"
+                @contextmenu="(e) => handleContextMenu(e, item)"
               >
                 <span class="song-title">{{ item.title }}</span>
                 <span class="song-artist">{{ item.artist }}</span>
+                <div v-show="hoveredSongId === item.id" class="song-actions">
+                  <n-button
+                    quaternary
+                    circle
+                    size="small"
+                    class="action-btn"
+                    title="播放"
+                    @click.stop="handlePlayById(item.id)"
+                  >
+                    <n-icon :component="PlayCircle" size="16" />
+                  </n-button>
+                  <n-button
+                    quaternary
+                    circle
+                    size="small"
+                    class="action-btn"
+                    :title="miniState.favoriteIds.has(item.id) ? '取消收藏' : '收藏'"
+                    @click.stop="toggleSongFavorite(item)"
+                  >
+                    <n-icon
+                      :component="miniState.favoriteIds.has(item.id) ? HeartSharp : HeartOutline"
+                      :color="miniState.favoriteIds.has(item.id) ? '#ef4444' : '#9ab4d8'"
+                      size="16"
+                    />
+                  </n-button>
+                  <n-button
+                    quaternary
+                    circle
+                    size="small"
+                    class="action-btn"
+                    title="更多"
+                    @click.stop="handleContextMenu($event, item)"
+                  >
+                    <n-icon :component="EllipsisHorizontal" size="16" />
+                  </n-button>
+                </div>
               </li>
             </ul>
           </div>
         </div>
       </transition>
+      <!-- 右键菜单 -->
+      <n-dropdown
+        trigger="manual"
+        placement="bottom-start"
+        :x="contextMenuX"
+        :y="contextMenuY"
+        :show="showContextMenu"
+        :options="[]"
+        :scrollable="true"
+        @clickoutside="handleMenuClickoutside"
+      >
+        <template #default>
+          <song-context-menu
+            :row="contextRow"
+            @play="handleMenuSelect('play')"
+            @play-next="handleMenuSelect('play-next')"
+            @toggle-favorite="handleMenuSelect('favorite')"
+            @add-to-playlist="handleAddToPlaylist"
+          >
+            <template #default="{ options, onSelect }">
+              <n-dropdown
+                trigger="manual"
+                placement="bottom-start"
+                :show="true"
+                :options="options"
+                @select="onSelect"
+              />
+            </template>
+          </song-context-menu>
+        </template>
+      </n-dropdown>
     </div>
   </div>
 </template>
@@ -471,29 +636,62 @@ watch(
 }
 
 .playlist-list {
-  @apply m-0 list-none space-y-2 p-0;
+  @apply m-0 list-none space-y-1 p-0;
 }
 
 .playlist-item {
-  @apply cursor-pointer rounded-xl border border-transparent bg-white/5 px-3 py-2 transition-all;
+  @apply cursor-pointer rounded-lg px-3 py-2 transition-all;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .playlist-item:hover {
-  border-color: rgba(112, 209, 255, 0.4);
-  background: rgba(112, 209, 255, 0.08);
+  background: rgba(112, 209, 255, 0.1);
 }
 
 .playlist-item.active {
-  border-color: rgba(30, 215, 96, 0.5);
-  background: rgba(30, 215, 96, 0.12);
+  background: rgba(30, 215, 96, 0.15);
 }
 
 .song-title {
   @apply block truncate text-sm text-white;
+  flex: 1;
 }
 
 .song-artist {
   @apply block truncate text-xs text-[#c6cfe0];
+  flex: 1;
+}
+
+.song-actions {
+  @apply flex items-center gap-2;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.playlist-item:hover .song-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.action-btn {
+  @apply grid h-8 w-8 place-items-center rounded-full;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e9eefb;
+  transition: all 0.2s;
+  pointer-events: auto;
+}
+
+.action-btn:hover {
+  background: rgba(112, 209, 255, 0.2);
+  border-color: rgba(112, 209, 255, 0.4);
+  transform: translateY(-1px);
 }
 
 .playlist-placeholder {
