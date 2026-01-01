@@ -2,7 +2,21 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 // 判定当前是否运行在 Tauri 环境，用插件请求可绕过跨域限制
 function isTauriEnvironment(): boolean {
-  return typeof window !== "undefined" && "__TAURI_IPC__" in window;
+  if (typeof window === "undefined") return false;
+
+  // Tauri 2 使用的全局标识与环境变量，兼容旧版的 __TAURI_IPC__
+  const globalWindow = window as unknown as Record<string, unknown>;
+  if (
+    "__TAURI_IPC__" in globalWindow ||
+    "__TAURI__" in globalWindow ||
+    "__TAURI_INTERNALS__" in globalWindow
+  ) {
+    return true;
+  }
+
+  // Vite + Tauri 模板会注入 TAURI_PLATFORM 等环境变量，可作为兜底判断
+  const env = (import.meta as unknown as { env?: Record<string, unknown> }).env ?? {};
+  return Boolean(env.TAURI_PLATFORM || env.TAURI_ARCH || env.TAURI_FAMILY);
 }
 
 type RequestBody = RequestInit["body"] | Record<string, unknown> | undefined;
