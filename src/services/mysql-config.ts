@@ -1,5 +1,5 @@
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { readTextFile, writeTextFile, exists } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, exists, mkdir } from "@tauri-apps/plugin-fs";
 import type { MysqlConfig } from "../types/settings";
 
 const CONFIG_FILE = "mysql-config.json";
@@ -92,6 +92,15 @@ class MysqlConfigManager {
 
     try {
       const configPath = await this.getConfigPath();
+      const dataDir = await appDataDir();
+
+      // 确保目录存在
+      const dirExists = await exists(dataDir);
+      if (!dirExists) {
+        await mkdir(dataDir, { recursive: true });
+        console.log("已创建应用数据目录:", dataDir);
+      }
+
       await writeTextFile(configPath, JSON.stringify(this.config, null, 2));
       console.log("已保存 MySQL 配置:", this.config);
     } catch (error) {
