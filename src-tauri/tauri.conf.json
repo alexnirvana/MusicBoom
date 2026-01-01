@@ -28,6 +28,11 @@
       "csp": null
     }
   },
+  "plugins": {
+    "http": {
+      "scope": ["http://*/*", "https://*/*"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
