@@ -419,6 +419,18 @@ async function restoreFromSnapshot(context: PlayAuthContext) {
 async function togglePlay() {
   if (!currentTrack.value) return;
   if (audio.paused) {
+    // 如果已有音频源且未播放完毕，则直接继续播放，避免重新加载导致回到开头
+    if (audio.src && !audio.ended) {
+      try {
+        await audio.play();
+        state.isPlaying = true;
+        state.error = null;
+        return;
+      } catch (error) {
+        const hint = error instanceof Error ? error.message : String(error);
+        state.error = `继续播放失败：${hint}`;
+      }
+    }
     await playCurrent();
   } else {
     audio.pause();
