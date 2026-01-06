@@ -31,11 +31,6 @@ const playlists = usePlaylistsStore();
 const favorites = useFavoriteStore();
 const message = useMessage();
 
-// 检查 store 是否已初始化
-const isStoreReady = computed(() => {
-  return playlists.state && favorites.state;
-});
-
 function renderIcon(icon: Component, color = "#9ab4d8") {
   return () => h(NIcon, { size: 16, color }, { default: () => h(icon) });
 }

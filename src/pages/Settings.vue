@@ -19,6 +19,8 @@ import type {
 import type { Ref } from "vue";
 import { pathConfigManager } from "../services/path-config";
 import { openlistConfigManager } from "../services/openlist-config";
+import { navidromeConfigManager } from "../services/navidrome-config";
+import { mysqlConfigManager } from "../services/mysql-config";
 
 // 消息提示实例
 const message = useMessage();
@@ -180,7 +182,6 @@ async function refreshDirectorySize(dir: string, holder: Ref<string>, label: str
 // 将存储中的数据同步到本地表单，避免直接编辑响应式全局状态
 async function syncFormFromStore() {
   try {
-    const { navidromeConfigManager } = await import("../services/navidrome-config");
     await navidromeConfigManager.initialize();
     const navidromeConfig = navidromeConfigManager.getConfig();
     if (navidromeConfig) {
@@ -249,7 +250,6 @@ async function syncFormFromStore() {
 // 初始化本地路径与表单数据
 onMounted(async () => {
   try {
-    const { mysqlConfigManager } = await import("../services/mysql-config");
     await mysqlConfigManager.initialize();
     const config = mysqlConfigManager.getConfig();
     if (config) {
@@ -322,7 +322,6 @@ watch(
 async function handleSaveNavidrome() {
   savingNavidrome.value = true;
   try {
-    const { navidromeConfigManager } = await import("../services/navidrome-config");
     await navidromeConfigManager.saveConfig({ ...navidromeForm });
     message.success("Navidrome 配置已保存");
   } catch (error) {

@@ -74,7 +74,7 @@ class PathConfigManager {
       this.notifyListeners();
     } catch (error) {
       console.error("保存路径配置文件失败:", error);
-      throw new Error("保存配置文件失败");
+      throw new Error("保存配置文件失败:"+error);
     }
   }
 

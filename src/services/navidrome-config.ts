@@ -93,7 +93,7 @@ class NavidromeConfigManager {
       console.log("已保存 Navidrome 配置:", { ...this.config, password: "***" });
     } catch (error) {
       console.error("保存 Navidrome 配置文件失败:", error);
-      throw new Error("保存配置文件失败");
+      throw new Error("保存配置文件失败:"+error);
     }
   }
 

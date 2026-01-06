@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "music_boom",
+  "productName": "music-boom",
   "version": "0.1.0",
-  "identifier": "com.alex.music_boom",
+  "identifier": "com.alex.music-boom",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

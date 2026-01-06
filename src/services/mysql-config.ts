@@ -96,7 +96,7 @@ class MysqlConfigManager {
       console.log("已保存 MySQL 配置:", this.config);
     } catch (error) {
       console.error("保存 MySQL 配置文件失败:", error);
-      throw new Error("保存配置文件失败");
+      throw new Error("保存配置文件失败:"+error);
     }
   }
 
