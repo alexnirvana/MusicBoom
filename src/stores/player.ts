@@ -17,6 +17,7 @@ import { readSetting } from "../services/settings-table";
 import { SETTING_KEYS } from "../constants/setting-keys";
 import { recordRecentPlay } from "../services/recent-plays";
 import { emitRecentPlayUpdated } from "../utils/recent-play-events";
+import { pathConfigManager } from "../services/path-config";
 
 const audio = new Audio();
 audio.preload = "metadata";
@@ -199,8 +200,19 @@ async function resolvePlayableSource(track: NavidromeSong, context: PlayAuthCont
   }
 
   // 3. 检查缓存目录
-  const downloadSettings = await readSetting<DownloadSettings>(SETTING_KEYS.DOWNLOAD);
-  const cacheDir = downloadSettings?.cacheDir?.trim();
+  let cacheDir: string | undefined;
+  // 优先读取 path-config 中的缓存目录，保证与下载设置保持一致
+  try {
+    await pathConfigManager.initialize();
+    cacheDir = pathConfigManager.getConfig()?.cacheDir?.trim();
+  } catch (error) {
+    console.warn("读取路径配置失败，将回退到数据库设置", error);
+  }
+
+  if (!cacheDir) {
+    const downloadSettings = await readSetting<DownloadSettings>(SETTING_KEYS.DOWNLOAD);
+    cacheDir = downloadSettings?.cacheDir?.trim();
+  }
   let cachePath: string | null = null;
 
   if (cacheDir) {
