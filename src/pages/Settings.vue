@@ -352,19 +352,14 @@ async function handleSaveOpenlist() {
 async function handleSaveDownload() {
   savingDownload.value = true;
   try {
-    // 保存路径到本地配置文件
+    // 保存路径到本地配置文件，同时保持数据库记录一致
     await pathConfigManager.saveConfig({
       musicDir: downloadForm.musicDir,
       cacheDir: downloadForm.cacheDir,
     });
 
-    // 保存其他设置到数据库（排除 musicDir 和 cacheDir）
-    const downloadSettings = {
-      ...downloadForm,
-      musicDir: "",
-      cacheDir: "",
-    };
-    await updateDownload(downloadSettings);
+    // 将完整路径同步到数据库，避免读取缓存目录时出现不一致
+    await updateDownload({ ...downloadForm });
 
     message.success("下载与缓存设置已保存");
   } catch (error) {
