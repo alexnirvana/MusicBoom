@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { emit, listen } from "@tauri-apps/api/event";
-import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { LogicalPosition, LogicalSize, currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import {
   HeartOutline,
   HeartSharp,
@@ -49,6 +50,23 @@ const unlistenState = ref<(() => void) | null>(null);
 const pendingPlayState = ref<boolean | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
 const miniWindow = getCurrentWindow();
+const dockSide = ref<"left" | "right" | "top" | null>(null);
+const dockHidden = ref(false);
+const dockMetrics = ref<{
+  side: "left" | "right" | "top";
+  visibleX: number;
+  visibleY: number;
+  hiddenX: number;
+  hiddenY: number;
+} | null>(null);
+const hideTimer = ref<number | null>(null);
+const hoveringShell = ref(false);
+const moveUnlisten = ref<UnlistenFn | null>(null);
+const resizeUnlisten = ref<UnlistenFn | null>(null);
+
+const DOCK_THRESHOLD = 8;
+const DOCK_HANDLE_SIZE = 10;
+const AUTO_HIDE_DELAY = 500;
 
 // 播放列表hover状态
 const hoveredSongId = ref<string | null>(null);
@@ -72,11 +90,19 @@ function setActionVisible(visible: boolean) {
 
 function handleMouseEnter() {
   setActionVisible(true);
+  hoveringShell.value = true;
+  if (dockSide.value && dockHidden.value) {
+    showDockedWindow();
+  }
 }
 
 function handleMouseLeave() {
   setActionVisible(false);
   hoveredSongId.value = null;
+  hoveringShell.value = false;
+  if (dockSide.value) {
+    scheduleDockHide();
+  }
 }
 
 // 播放列表hover处理
@@ -212,6 +238,7 @@ async function resizeWindowToContent() {
     } else {
       await miniWindow.setSize(new LogicalSize(Math.ceil(rect.width), Math.ceil(rect.height)));
     }
+    await evaluateDockState();
   } catch (error) {
     console.error("调整精简窗口尺寸失败:", error);
   }
@@ -251,6 +278,119 @@ function requestState() {
   emit("player:state-request");
 }
 
+function clearDockHideTimer() {
+  if (hideTimer.value !== null) {
+    window.clearTimeout(hideTimer.value);
+    hideTimer.value = null;
+  }
+}
+
+function scheduleDockHide() {
+  clearDockHideTimer();
+  hideTimer.value = window.setTimeout(() => {
+    if (!dockSide.value || hoveringShell.value) return;
+    hideDockedWindow();
+  }, AUTO_HIDE_DELAY);
+}
+
+async function showDockedWindow() {
+  if (!dockMetrics.value) return;
+  clearDockHideTimer();
+  try {
+    await miniWindow.setPosition(new LogicalPosition(dockMetrics.value.visibleX, dockMetrics.value.visibleY));
+    dockHidden.value = false;
+  } catch (error) {
+    console.error("显示贴边精简窗口失败:", error);
+  }
+}
+
+async function hideDockedWindow() {
+  if (!dockMetrics.value) return;
+  try {
+    await miniWindow.setPosition(new LogicalPosition(dockMetrics.value.hiddenX, dockMetrics.value.hiddenY));
+    dockHidden.value = true;
+  } catch (error) {
+    console.error("隐藏贴边精简窗口失败:", error);
+  }
+}
+
+async function evaluateDockState() {
+  try {
+    if (dockHidden.value && dockMetrics.value) {
+      return;
+    }
+    const monitor = await currentMonitor();
+    if (!monitor) return;
+    const scale = monitor.scaleFactor;
+    const position = await miniWindow.outerPosition();
+    const size = await miniWindow.outerSize();
+    const workAreaX = monitor.workArea.position.x / scale;
+    const workAreaY = monitor.workArea.position.y / scale;
+    const workAreaWidth = monitor.workArea.size.width / scale;
+    const workAreaHeight = monitor.workArea.size.height / scale;
+    const posX = position.x / scale;
+    const posY = position.y / scale;
+    const width = size.width / scale;
+    const height = size.height / scale;
+    const leftDistance = Math.abs(posX - workAreaX);
+    const rightDistance = Math.abs(workAreaX + workAreaWidth - (posX + width));
+    const topDistance = Math.abs(posY - workAreaY);
+    let nextSide: "left" | "right" | "top" | null = null;
+
+    if (leftDistance <= DOCK_THRESHOLD) {
+      nextSide = "left";
+    } else if (rightDistance <= DOCK_THRESHOLD) {
+      nextSide = "right";
+    } else if (topDistance <= DOCK_THRESHOLD) {
+      nextSide = "top";
+    }
+
+    if (!nextSide) {
+      dockSide.value = null;
+      dockMetrics.value = null;
+      if (dockHidden.value) {
+        dockHidden.value = false;
+      }
+      clearDockHideTimer();
+      return;
+    }
+
+    const visibleX =
+      nextSide === "left"
+        ? workAreaX
+        : nextSide === "right"
+          ? workAreaX + workAreaWidth - width
+          : posX;
+    const visibleY = nextSide === "top" ? workAreaY : posY;
+    const hiddenX =
+      nextSide === "left"
+        ? workAreaX - (width - DOCK_HANDLE_SIZE)
+        : nextSide === "right"
+          ? workAreaX + workAreaWidth - DOCK_HANDLE_SIZE
+          : posX;
+    const hiddenY = nextSide === "top" ? workAreaY - (height - DOCK_HANDLE_SIZE) : posY;
+
+    dockSide.value = nextSide;
+    dockMetrics.value = {
+      side: nextSide,
+      visibleX,
+      visibleY,
+      hiddenX,
+      hiddenY,
+    };
+
+    if (!dockHidden.value) {
+      await miniWindow.setPosition(new LogicalPosition(visibleX, visibleY));
+    }
+
+    if (!hoveringShell.value) {
+      scheduleDockHide();
+    }
+  } catch (error) {
+    console.error("检测贴边状态失败:", error);
+  }
+}
+
 // 监听主窗口广播的播放状态
 async function setupStateListener() {
   unlistenState.value = await listen("player:state", (event) => {
@@ -277,6 +417,13 @@ onMounted(async () => {
   await setupStateListener();
   requestState();
   await resizeWindowToContent();
+  await evaluateDockState();
+  moveUnlisten.value = await miniWindow.listen("tauri://move", () => {
+    evaluateDockState();
+  });
+  resizeUnlisten.value = await miniWindow.listen("tauri://resize", () => {
+    evaluateDockState();
+  });
 
   // 阻止双击卡片区域的默认行为（防止最大化/还原），但不影响窗口拖动
   const shell = shellRef.value;
@@ -290,6 +437,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unlistenState.value?.();
+  moveUnlisten.value?.();
+  resizeUnlisten.value?.();
+  clearDockHideTimer();
 });
 
 watch(playlistOpen, () => {
